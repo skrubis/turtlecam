@@ -1,0 +1,15 @@
+[Unit]
+Description=TurtleCam Smart Terrarium Controller
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/turtlecam
+ExecStart=/usr/bin/python3 -m turtlecam.main
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
