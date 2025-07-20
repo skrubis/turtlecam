@@ -60,21 +60,29 @@ sudo apt install -y chrony # For time synchronization
 git clone https://github.com/skrubis/turtlecam.git
 cd turtlecam
 
-# Create and activate virtual environment
+# Create a virtual environment
 python3 -m venv venv
+
+# Activate the virtual environment
+# On Linux/macOS:
 source venv/bin/activate
+# On Windows:
+.\venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Configure your environment
+# Configure your environment by copying the example files.
+# On Linux/macOS:
 cp .env.example .env
-# Edit .env with your Telegram bot token and chat ID
-nano .env
-
-# Copy default config and customize
 cp config.example.yaml config.yaml
-nano config.yaml
+
+# On Windows:
+copy .env.example .env
+copy config.example.yaml config.yaml
+
+# Edit .env with your Telegram bot token and chat ID.
+# Edit config.yaml to customize your setup (e.g., camera, sensors).
 ```
 
 ## Configuration
@@ -133,35 +141,39 @@ relay:
 
 ## Usage
 
-### Running as a Service
+### Running as a Service (Linux/Raspberry Pi Only)
 
-Install as a systemd service for automatic startup:
+To install TurtleCam as a systemd service for automatic startup on a Linux system, use the following commands. This is the recommended way to run the application on a Raspberry Pi.
 
 ```bash
-# Copy service file
-sudo cp turtlecam.service /etc/systemd/system/
+# Copy the service file (note the correct path)
+sudo cp systemd/turtlecam.service /etc/systemd/system/
 
-# Enable service
+# Reload the systemd daemon, enable and start the service
+sudo systemctl daemon-reload
 sudo systemctl enable turtlecam.service
-
-# Start service
 sudo systemctl start turtlecam.service
 
-# Check status
+# Check the status of the service
 sudo systemctl status turtlecam.service
 ```
 
 ### Manual Running
 
+To run the application manually from the command line for development or testing:
+
 ```bash
-# Activate virtual environment
+# Activate the virtual environment
+# On Linux/macOS:
 source venv/bin/activate
+# On Windows:
+.\venv\Scripts\activate
 
-# Start the main service in foreground
-python -m turtlecam
+# Start the main application
+python -m turtlecam.main
 
-# Or with custom config path
-python -m turtlecam --config /path/to/custom/config.yaml
+# Or with a custom config path
+python -m turtlecam.main --config /path/to/custom/config.yaml
 ```
 
 ### Generating Daily Reports
