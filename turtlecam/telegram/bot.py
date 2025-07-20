@@ -338,30 +338,31 @@ class TurtleBot:
 
 
 class AsyncTelegramSender:
-    """Utility class for sending Telegram messages from non-async code.
+    """A thread-safe, async sender for Telegram messages and files."""
 
-    This provides a way to call async methods from synchronous code by using
-    the bot's existing asyncio event loop.
-    """
-
-    def __init__(self, bot: TurtleBot):
-        """Initialize with a TurtleBot instance."""
+    def __init__(self, bot: 'TurtleBot', chat_id: int):
         self.bot = bot
-        self.application = bot.application
+        self.chat_id = chat_id
 
     def _schedule_task(self, coro):
         """Schedule a coroutine on the bot's event loop."""
-        if self.application and self.application.loop and self.application.loop.is_running():
+        if self.bot.application and self.bot.application.loop and self.bot.application.loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, self.bot.application.loop)
             asyncio.run_coroutine_threadsafe(coro, self.application.loop)
         else:
             logger.warning("Telegram bot loop not running. Cannot schedule task.")
 
-    def send_message(self, *args, **kwargs):
+    def send_message(self, text: str, *args, **kwargs):
         """Schedule a message to be sent."""
-        self._schedule_task(self.bot.application.bot.send_message(*args, **kwargs))
+        # Ensure chat_id is always present
+        kwargs['chat_id'] = kwargs.get('chat_id', self.chat_id)
+        self._schedule_task(self.bot.application.bot.send_message(text=text, *args, **kwargs))
 
     def _send_file(self, file_type: str, *args, **kwargs):
         """Internal helper to schedule a file to be sent."""
+        # Ensure chat_id is always present
+        kwargs['chat_id'] = kwargs.get('chat_id', self.chat_id)
+        
         # Dynamically get the correct send method from the bot object
         # e.g., bot.send_photo, bot.send_animation
         send_method = getattr(self.bot.application.bot, f"send_{file_type}", None)

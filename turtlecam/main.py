@@ -159,7 +159,10 @@ class TurtleCam:
                         token=bot_token,
                         chat_id=chat_id
                     )
-                    self.telegram_sender = AsyncTelegramSender(self.telegram_bot)
+                    self.telegram_sender = AsyncTelegramSender(
+                bot=self.telegram_bot, 
+                chat_id=self.config.get("telegram.chat_id")
+            )
             
             # Initialize components
             self._init_components()
