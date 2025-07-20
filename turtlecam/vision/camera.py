@@ -16,9 +16,9 @@ try:
     from picamera2.encoders import JpegEncoder
     from picamera2.outputs import FileOutput
     PICAMERA_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     PICAMERA_AVAILABLE = False
-    logging.warning("picamera2 not available, using mock camera")
+    logging.warning(f"picamera2 not available, using mock camera. Error: {e}", exc_info=True)
 
 logger = logging.getLogger(__name__)
 
