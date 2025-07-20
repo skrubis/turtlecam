@@ -183,11 +183,12 @@ class TurtleCam:
             testing_mode = self.config.get("system.testing_mode", False)
 
             # Initialize environmental sensor
+            sensor_config = self.config.get("environmental_monitoring.sensor", {})
             self.sensor = DHT22Sensor(
-                pin=self.config.get("environment.sensor_pin", 4),
-                poll_interval=self.config.get("environment.poll_interval_sec", 60),
-                db_path=self.data_store.db_path,
-                mock_mode=testing_mode
+                data_store=self.data_store,
+                pin=sensor_config.get("pin", 4),
+                poll_interval=sensor_config.get("poll_interval_sec", 60),
+                mock_mode=sensor_config.get("mock_mode", not DHT_AVAILABLE)
             )
             self.sensor.start()
             logger.info("Environmental sensor started")
@@ -203,8 +204,10 @@ class TurtleCam:
             )
 
             # Initialize relay controller
+            relay_config = self.config.get_section("relay")
             self.relay = RelayController(
-                config_path=self.config.get("relay.config_path", "config/relay.yaml"),
+                relay_config=relay_config,
+                data_store=self.data_store,
                 mock_mode=self.config.get("relay.mock_mode", False) or testing_mode
             )
 
@@ -215,12 +218,12 @@ class TurtleCam:
             logger.info("Relay controller and alert monitor started")
 
             # Initialize vision system
-            vision_config = self.config.get_section("vision")
-            vision_config['testing_mode'] = testing_mode
-            vision_config['data_store'] = self.data_store
-            vision_config['telegram_sender'] = self.telegram_sender
-
-            self.vision = VisionOrchestrator(**vision_config)
+            self.vision = VisionOrchestrator(
+                config=self.config.get_section("vision"),
+                data_store=self.data_store,
+                telegram_sender=self.telegram_sender,
+                mock_mode=testing_mode
+            )
             self.vision.start()
             logger.info("Vision system started")
 

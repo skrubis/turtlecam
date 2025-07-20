@@ -6,19 +6,20 @@ and provides methods to read current environmental conditions.
 
 import time
 import logging
+import random
 import threading
-import sqlite3
+import time
 from datetime import datetime
-from pathlib import Path
 
 # Import sensor library with fallback for development on non-Pi systems
 try:
     import adafruit_dht
     import board
+
     DHT_AVAILABLE = True
 except (ImportError, NotImplementedError):
     DHT_AVAILABLE = False
-    logging.warning("adafruit_dht not available, using mock sensor")
+    logging.warning("adafruit_dht library not found. Using mock sensor.")
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +28,9 @@ class DHT22Sensor:
     """Interface to DHT22 temperature-humidity sensor."""
     
     def __init__(self, 
+                 data_store,
                  pin=4,            # Default to GPIO4
                  poll_interval=60, # Seconds between readings
-                 db_path="data/turtlecam.db",
                  mock_mode=not DHT_AVAILABLE):
         """Initialize the DHT22 sensor interface.
         
@@ -39,9 +40,9 @@ class DHT22Sensor:
             db_path (str): Path to SQLite database for logging
             mock_mode (bool): If True, use a mock sensor for testing
         """
+        self.data_store = data_store
         self.pin = pin
         self.poll_interval = poll_interval
-        self.db_path = Path(db_path)
         self.mock_mode = mock_mode
         
         # Thread control
@@ -55,9 +56,8 @@ class DHT22Sensor:
         self.read_count = 0
         self.error_count = 0
         
-        # Initialize sensor and database
+        # Initialize sensor
         self._init_sensor()
-        self._init_database()
         
         # Thread for polling
         self.poll_thread = None
@@ -78,32 +78,6 @@ class DHT22Sensor:
                 self.sensor = None
                 self.mock_mode = True
                 
-    def _init_database(self):
-        """Initialize the SQLite database for logging."""
-        try:
-            # Ensure the directory exists
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Connect and create table if needed
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Create env_log table if not exists
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS env_log (
-                ts            DATETIME PRIMARY KEY,
-                temp_c        REAL,
-                humidity_pct  REAL
-            )
-            ''')
-            
-            conn.commit()
-            conn.close()
-            logger.info(f"Initialized database at {self.db_path}")
-            
-        except Exception as e:
-            logger.error(f"Error initializing database: {e}")
-        
     def start(self):
         """Start the sensor polling thread."""
         with self.lock:
@@ -148,12 +122,6 @@ class DHT22Sensor:
                 # Read sensor values
                 self._read_sensor()
                 
-                # Log to database if successful
-                if self.last_temperature is not None and self.last_humidity is not None:
-                    self._log_to_database(
-                        self.last_temperature, self.last_humidity, self.last_read_time
-                    )
-                
                 # Sleep until next reading
                 time.sleep(self.poll_interval)
                 
@@ -163,100 +131,51 @@ class DHT22Sensor:
             logger.info("DHT22 polling loop ended")
     
     def _read_sensor(self):
-        """Read sensor values and update state."""
+        """Read sensor values, validate them, and update state."""
+        temp = None
+        humidity = None
+        timestamp = datetime.now()
+
         try:
             if self.mock_mode:
-                # Generate mock values with some drift
-                import random
-                import math
-                
-                # Create a daily cycle with some noise
-                t = time.time() / 3600  # Convert to hours
-                daily_cycle = math.sin(t * 2 * math.pi / 24)  # 24-hour cycle
-                
-                # Temperature ranges from 22-33°C with daily cycle and noise
-                temp_base = 27.5  # Center point
-                temp_amplitude = 5.0  # Daily range
-                temp_noise = 0.5  # Random fluctuation
-                temp = temp_base + daily_cycle * temp_amplitude + (random.random() - 0.5) * temp_noise
-                
-                # Humidity ranges from 40-70% with inverse relationship to temp
-                humidity_base = 55.0  # Center point
-                humidity_amplitude = 15.0  # Daily range
-                humidity_noise = 2.0  # Random fluctuation
-                humidity = humidity_base - daily_cycle * humidity_amplitude + (random.random() - 0.5) * humidity_noise
-                
-                # Clamp values to reasonable ranges
-                temp = max(21.0, min(35.0, temp))
-                humidity = max(35.0, min(75.0, humidity))
-                
-                timestamp = datetime.now()
-                
+                # Generate simple mock data
+                temp = 25.0 + random.uniform(-1.0, 1.0)
+                humidity = 55.0 + random.uniform(-5.0, 5.0)
+                logger.debug(f"Mock DHT22 reading: {temp:.1f}°C, {humidity:.1f}%")
+            elif self.sensor:
+                # Read from actual sensor
+                temp = self.sensor.temperature
+                humidity = self.sensor.humidity
+                logger.debug(f"DHT22 reading: {temp:.1f}°C, {humidity:.1f}%")
+
+            # Validate readings
+            if temp is not None and humidity is not None and (0 <= temp <= 50) and (0 <= humidity <= 100):
                 with self.lock:
                     self.last_temperature = temp
                     self.last_humidity = humidity
                     self.last_read_time = timestamp
                     self.read_count += 1
-                    
-                logger.debug(f"Mock DHT22 reading: {temp:.1f}°C, {humidity:.1f}%")
-                
+                # Log valid reading to database
+                self._log_to_database(temp, humidity, timestamp)
             else:
-                # Read from actual sensor
-                try:
-                    # Try to read values - DHT sensors can be flaky
-                    # and sometimes need multiple attempts
-                    temp = self.sensor.temperature
-                    humidity = self.sensor.humidity
-                    timestamp = datetime.now()
-                    
-                    with self.lock:
-                        self.last_temperature = temp
-                        self.last_humidity = humidity
-                        self.last_read_time = timestamp
-                        self.read_count += 1
-                        
-                    logger.debug(f"DHT22 reading: {temp:.1f}°C, {humidity:.1f}%")
-                    
-                except RuntimeError as e:
-                    # DHT sensors sometimes fail to read
-                    logger.warning(f"DHT22 reading failed: {e}")
-                    self.error_count += 1
-                    time.sleep(2)  # Wait before retrying
-                    
+                logger.warning(f"Invalid sensor reading: temp={temp}, humidity={humidity}")
+                self.error_count += 1
+
+        except RuntimeError as e:
+            # DHT sensors sometimes fail to read. This is expected.
+            logger.warning(f"DHT22 reading failed: {e}")
+            self.error_count += 1
+            time.sleep(2)  # Wait before retrying
         except Exception as e:
-            logger.error(f"Error reading DHT22: {e}")
+            logger.error("Unexpected error reading DHT22 sensor", exc_info=True)
             self.error_count += 1
     
-    def _log_to_database(self, temperature, humidity, timestamp=None):
-        """Log sensor readings to database.
-        
-        Args:
-            temperature (float): Temperature in Celsius
-            humidity (float): Relative humidity in percent
-            timestamp (datetime, optional): Reading timestamp, defaults to now
-        """
-        if timestamp is None:
-            timestamp = datetime.now()
-            
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Insert record
-            cursor.execute('''
-            INSERT INTO env_log (ts, temp_c, humidity_pct)
-            VALUES (?, ?, ?)
-            ''', (
-                timestamp.isoformat(), temperature, humidity
-            ))
-            
-            conn.commit()
-            conn.close()
-            
-            logger.debug(f"Logged environmental data to database: {temperature:.1f}°C, {humidity:.1f}%")
-            
-        except Exception as e:
-            logger.error(f"Error logging to database: {e}")
+    def _log_to_database(self, temperature, humidity, timestamp):
+        """Log sensor readings to the database via the DataStore."""
+        if self.data_store:
+            self.data_store.log_env_reading(temperature, humidity, timestamp)
+        else:
+            logger.warning("DataStore not available, cannot log environmental data.")
     
     def get_temperature(self):
         """Get the last temperature reading.

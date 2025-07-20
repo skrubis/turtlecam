@@ -53,13 +53,12 @@ class TurtleBot:
         self.vision_orchestrator = vision_orchestrator
         self.env_monitor = env_monitor
         self.relay_controller = relay_controller
-        
-        # Initialize application
-        self.application = None
+
+        # Initialize application and bot instance
+        self.application = Application.builder().token(self.token).build()
+        self.bot = self.application.bot
+
         self._setup_handlers()
-        
-        # Bot instance for non-handler methods
-        self.bot = Bot(token=self.token)
         
         # Command handlers dictionary for easy help generation
         self.command_descriptions = {
@@ -75,8 +74,6 @@ class TurtleBot:
         
     def _setup_handlers(self):
         """Set up command handlers for the bot."""
-        self.application = Application.builder().token(self.token).build()
-        
         # Add command handlers
         self.application.add_handler(CommandHandler("start", self._start_command))
         self.application.add_handler(CommandHandler("help", self._help_command))
@@ -254,8 +251,13 @@ class TurtleBot:
         )
         
     async def _error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle errors in the telegram bot."""
-        logger.error(f"Telegram error: {context.error}")
+        """Log Errors caused by Updates."""
+        logger.error(
+            'Update "%s" caused error "%s"',
+            update,
+            context.error,
+            exc_info=context.error
+        )
         
     def start(self):
         """Start the Telegram bot."""
@@ -273,90 +275,36 @@ class TurtleBot:
             asyncio.run(self.application.stop())
             self.running = False
             
-    async def send_message(self, text: str, chat_id: str = None, parse_mode: str = None):
-        """Send a text message.
-        
-        Args:
-            text (str): Message text
-            chat_id (str, optional): Chat ID, defaults to self.chat_id
-            parse_mode (str, optional): Parse mode (HTML, Markdown)
-            
-        Returns:
-            bool: True if successful
-        """
+    async def _send_file(self, file_path: str, caption: str, chat_id: Optional[str], method: Callable, file_kwarg_name: str) -> bool:
+        """Generic method to send a file (photo or GIF)."""
+        chat_id = chat_id or self.chat_id
         if not chat_id:
-            chat_id = self.chat_id
-            
-        if not chat_id:
-            logger.error("No chat ID available for sending message")
+            logger.error(f"Cannot send file, no chat_id specified for {method.__name__}")
             return False
-            
+
         try:
-            await self.bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode)
+            with open(file_path, 'rb') as file_content:
+                kwargs = {
+                    'chat_id': chat_id,
+                    file_kwarg_name: InputFile(file_content),
+                    'caption': caption,
+                }
+                await method(**kwargs)
             return True
+        except FileNotFoundError:
+            logger.error(f"File not found for sending: {file_path}")
+            return False
         except Exception as e:
-            logger.error(f"Error sending message: {e}")
+            logger.error(f"Error sending file {file_path}: {e}", exc_info=True)
             return False
-    
-    async def send_photo(self, photo_path: str, caption: str = None, chat_id: str = None):
-        """Send a photo.
-        
-        Args:
-            photo_path (str): Path to the photo file
-            caption (str, optional): Photo caption
-            chat_id (str, optional): Chat ID, defaults to self.chat_id
-            
-        Returns:
-            bool: True if successful
-        """
-        if not chat_id:
-            chat_id = self.chat_id
-            
-        if not chat_id:
-            logger.error("No chat ID available for sending photo")
-            return False
-            
-        try:
-            with open(photo_path, 'rb') as photo_file:
-                await self.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=InputFile(photo_file),
-                    caption=caption
-                )
-            return True
-        except Exception as e:
-            logger.error(f"Error sending photo: {e}")
-            return False
-    
-    async def send_gif(self, gif_path: str, caption: str = None, chat_id: str = None):
-        """Send an animation (GIF).
-        
-        Args:
-            gif_path (str): Path to the GIF file
-            caption (str, optional): GIF caption
-            chat_id (str, optional): Chat ID, defaults to self.chat_id
-            
-        Returns:
-            bool: True if successful
-        """
-        if not chat_id:
-            chat_id = self.chat_id
-            
-        if not chat_id:
-            logger.error("No chat ID available for sending GIF")
-            return False
-            
-        try:
-            with open(gif_path, 'rb') as gif_file:
-                await self.bot.send_animation(
-                    chat_id=chat_id,
-                    animation=InputFile(gif_file),
-                    caption=caption
-                )
-            return True
-        except Exception as e:
-            logger.error(f"Error sending GIF: {e}")
-            return False
+
+    async def send_photo(self, photo_path: str, caption: str = None, chat_id: str = None) -> bool:
+        """Send a photo."""
+        return await self._send_file(photo_path, caption, chat_id, self.bot.send_photo, 'photo')
+
+    async def send_gif(self, gif_path: str, caption: str = None, chat_id: str = None) -> bool:
+        """Send an animation (GIF)."""
+        return await self._send_file(gif_path, caption, chat_id, self.bot.send_animation, 'animation')
     
     async def send_motion_alert(self, gif_path: str):
         """Send a motion alert with GIF.
@@ -391,63 +339,42 @@ class TurtleBot:
 
 class AsyncTelegramSender:
     """Utility class for sending Telegram messages from non-async code.
-    
-    This provides a way to call async methods from synchronous code.
+
+    This provides a way to call async methods from synchronous code by using
+    the bot's existing asyncio event loop.
     """
-    
+
     def __init__(self, bot: TurtleBot):
         """Initialize with a TurtleBot instance."""
         self.bot = bot
-        self.loop = asyncio.new_event_loop()
-        
+        self.application = bot.application
+
+    def _schedule_task(self, coro):
+        """Schedule a coroutine on the bot's event loop."""
+        if self.application and self.application.loop and self.application.loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, self.application.loop)
+        else:
+            logger.warning("Telegram bot loop not running. Cannot schedule task.")
+
     def send_message(self, *args, **kwargs):
         """Send a text message."""
-        asyncio.run_coroutine_threadsafe(
-            self.bot.send_message(*args, **kwargs),
-            self.loop
-        )
-        
+        self._schedule_task(self.bot.send_message(*args, **kwargs))
+
     def send_photo(self, *args, **kwargs):
         """Send a photo."""
-        asyncio.run_coroutine_threadsafe(
-            self.bot.send_photo(*args, **kwargs),
-            self.loop
-        )
-        
+        self._schedule_task(self.bot.send_photo(*args, **kwargs))
+
     def send_gif(self, *args, **kwargs):
         """Send an animation (GIF)."""
-        asyncio.run_coroutine_threadsafe(
-            self.bot.send_gif(*args, **kwargs),
-            self.loop
-        )
-        
+        self._schedule_task(self.bot.send_gif(*args, **kwargs))
+
     def send_motion_alert(self, *args, **kwargs):
         """Send a motion alert with GIF."""
-        asyncio.run_coroutine_threadsafe(
-            self.bot.send_motion_alert(*args, **kwargs),
-            self.loop
-        )
-        
+        self._schedule_task(self.bot.send_motion_alert(*args, **kwargs))
+
     def send_temperature_alert(self, *args, **kwargs):
         """Send a temperature alert."""
-        asyncio.run_coroutine_threadsafe(
-            self.bot.send_temperature_alert(*args, **kwargs),
-            self.loop
-        )
-        
-    def start_loop(self):
-        """Start the async event loop in a thread."""
-        def run_loop():
-            asyncio.set_event_loop(self.loop)
-            self.loop.run_forever()
-            
-        import threading
-        self.thread = threading.Thread(target=run_loop, daemon=True)
-        self.thread.start()
-        
-    def stop_loop(self):
-        """Stop the async event loop."""
-        self.loop.call_soon_threadsafe(self.loop.stop)
+        self._schedule_task(self.bot.send_temperature_alert(*args, **kwargs))
         
 def create_dot_env_template():
     """Create a .env.example template file for bot configuration."""

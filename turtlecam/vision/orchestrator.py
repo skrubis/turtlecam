@@ -15,7 +15,6 @@ from pathlib import Path
 
 from .camera import Camera
 from .motion_detector import MotionDetector
-from .crop_store import CropStore
 from .gif_builder import GIFBuilder
 
 logger = logging.getLogger(__name__)
@@ -28,20 +27,23 @@ class VisionOrchestrator:
     crop store, and GIF builder to detect motion and create GIFs.
     """
     
-    def __init__(self, 
-                 config=None,
-                 inactivity_timeout=8,
-                 mock_mode=False):
+    def __init__(self, config: dict, data_store, telegram_sender, mock_mode: bool = False):
         """Initialize the vision orchestrator.
-        
+
         Args:
-            config (dict): Configuration dictionary
-            inactivity_timeout (int): Seconds of inactivity before creating GIF
-            mock_mode (bool): Whether to use mock components for testing
+            config (dict): Vision-specific configuration dictionary.
+            data_store: The application's DataStore instance.
+            telegram_sender: The application's AsyncTelegramSender instance.
+            mock_mode (bool): Whether to use mock components for testing.
         """
-        self.config = config or {}
-        self.inactivity_timeout = inactivity_timeout
+        self.config = config
+        self.data_store = data_store
+        self.telegram_sender = telegram_sender
         self.mock_mode = mock_mode
+
+        # Extract parameters from config
+        motion_config = self.config.get('motion', {})
+        self.inactivity_timeout = motion_config.get('inactivity_timeout_sec', 10.0)
         
         # Thread control
         self.running = False
@@ -93,30 +95,15 @@ class VisionOrchestrator:
             detect_shadows=detect_shadows
         )
         
-        # Initialize crop store
-        base_dir = crop_config.get('base_dir', 'data/crops')
-        db_path = crop_config.get('db_path', 'data/turtlecam.db')
-        max_age_days = crop_config.get('max_age_days', 30)
-        max_disk_percent = crop_config.get('max_disk_percent', 80)
-        
-        self.crop_store = CropStore(
-            base_dir=base_dir,
-            db_path=db_path,
-            max_age_days=max_age_days,
-            max_disk_percent=max_disk_percent
-        )
-        
+        # The data_store handles all storage, including crops
+        self.crop_store = self.data_store
+
         # Initialize GIF builder
-        max_width = gif_config.get('max_width', 1920)
-        max_frames = gif_config.get('max_frames', 20)
-        gif_fps = gif_config.get('gif_fps', 4)
-        output_dir = gif_config.get('output_dir', 'data/gifs')
-        
         self.gif_builder = GIFBuilder(
-            max_width=max_width,
-            max_frames=max_frames,
-            gif_fps=gif_fps,
-            output_dir=output_dir
+            output_dir=self.data_store.get_image_dir('gifs'),
+            max_width=gif_config.get('max_width', 1920),
+            max_frames=gif_config.get('max_frames', 20),
+            gif_fps=gif_config.get('gif_fps', 4)
         )
         
     def start(self):

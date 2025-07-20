@@ -32,7 +32,8 @@ class RelayController:
     """
     
     def __init__(self, 
-                 config_path: str = "config/relay.yaml",
+                 relay_config: dict,
+                 data_store, # Add data_store for logging
                  mock_mode: bool = not GPIO_AVAILABLE):
         """Initialize the relay controller.
         
@@ -40,7 +41,8 @@ class RelayController:
             config_path (str): Path to relay configuration YAML
             mock_mode (bool): If True, use mock GPIO for testing
         """
-        self.config_path = Path(config_path)
+        self.config = relay_config
+        self.data_store = data_store
         self.mock_mode = mock_mode
         
         # Thread control
@@ -57,7 +59,7 @@ class RelayController:
         
         # Initialize GPIO and load configuration
         self._init_gpio()
-        self._load_config()
+        self._load_config(relay_config)
         
         # Thread for scheduling
         self.schedule_thread = None
@@ -77,109 +79,45 @@ class RelayController:
             logger.error(f"Error initializing GPIO: {e}")
             self.mock_mode = True
         
-    def _load_config(self):
-        """Load relay configuration from YAML file."""
+    def _load_config(self, config: dict):
+        """Load relay configuration from a dictionary."""
         try:
-            # Check if config file exists
-            if not self.config_path.exists():
-                # Create default configuration
-                self._create_default_config()
-            
-            # Load configuration
-            with open(self.config_path, 'r') as f:
-                config = yaml.safe_load(f)
-            
             # Process relay definitions
             relays_config = config.get('relays', {})
             for name, relay_config in relays_config.items():
                 pin = relay_config.get('pin')
-                initial_state = relay_config.get('initial_state', False)
-                
                 if pin is None:
                     logger.warning(f"No pin defined for relay '{name}', skipping")
                     continue
-                
-                # Add relay to our tracking
+
                 self.relays[name] = {
                     "pin": pin,
-                    "state": initial_state,
+                    "state": relay_config.get('initial_state', False),
                     "description": relay_config.get('description', ''),
                     "active_high": relay_config.get('active_high', True)
                 }
-                
-                # Initialize the GPIO pin
                 self._setup_relay_pin(name)
-            
+
             # Set up schedules
             schedules_config = config.get('schedules', {})
-            for name, schedule_config in schedules_config.items():
+            for name, schedule_entries in schedules_config.items():
                 if name not in self.relays:
                     logger.warning(f"Schedule for unknown relay '{name}', skipping")
                     continue
                 
-                # Process schedule entries
-                for entry in schedule_config:
+                for entry in schedule_entries:
                     time_spec = entry.get('time')
-                    action = entry.get('action', 'on').lower()
+                    state = entry.get('state')
                     days = entry.get('days', 'all')
-                    
-                    if not time_spec:
-                        logger.warning(f"No time specified for schedule entry {entry}, skipping")
-                        continue
-                    
-                    # Add to scheduler
-                    self._add_schedule_entry(name, time_spec, action == 'on', days)
-            
-            logger.info(f"Loaded configuration for {len(self.relays)} relays")
-            return True
-            
+                    if time_spec is not None and state is not None:
+                        self._add_schedule_entry(name, time_spec, state, days)
+                    else:
+                        logger.warning(f"Incomplete schedule entry for '{name}': {entry}")
+
+            logger.info("Loaded relay configuration and schedules")
         except Exception as e:
-            logger.error(f"Error loading relay configuration: {e}")
+            logger.error("Error loading relay configuration", exc_info=True)
             return False
-    
-    def _create_default_config(self):
-        """Create default configuration file if none exists."""
-        default_config = {
-            "relays": {
-                "daylight": {
-                    "pin": 17,
-                    "description": "Daylight lighting",
-                    "active_high": True,
-                    "initial_state": False
-                },
-                "uv_heat": {
-                    "pin": 18,
-                    "description": "UV and heating lamp",
-                    "active_high": True,
-                    "initial_state": False
-                },
-                "fan": {
-                    "pin": 27,
-                    "description": "Cooling fan",
-                    "active_high": True,
-                    "initial_state": False
-                }
-            },
-            "schedules": {
-                "daylight": [
-                    {"time": "08:00", "action": "on", "days": "all"},
-                    {"time": "20:00", "action": "off", "days": "all"}
-                ],
-                "uv_heat": [
-                    {"time": "09:00", "action": "on", "days": "all"},
-                    {"time": "18:00", "action": "off", "days": "all"}
-                ]
-            }
-        }
-        
-        # Create parent directory if it doesn't exist
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Write default configuration
-        with open(self.config_path, 'w') as f:
-            yaml.dump(default_config, f, default_flow_style=False)
-            
-        logger.info(f"Created default relay configuration at {self.config_path}")
     
     def _setup_relay_pin(self, relay_name):
         """Set up GPIO pin for a relay.
@@ -349,16 +287,18 @@ class RelayController:
             bool: True if successful, False otherwise
         """
         with self.lock:
-            # Validate relay name
-            if relay_name not in self.relays:
-                logger.warning(f"Unknown relay: {relay_name}")
+            relay = self.relays.get(relay_name)
+            if not relay:
+                logger.error(f"Attempted to set unknown relay '{relay_name}'")
                 return False
-                
-            # Get relay information
-            relay = self.relays[relay_name]
             
-            # Set the pin state
+            # Update state
+            relay["state"] = state
             self._set_pin_state(relay["pin"], state, relay["active_high"])
+
+            # Log the change to the database
+            trigger_type = "manual" if manual else "schedule"
+            self.data_store.log_relay_change(relay_name, state, trigger_type)
             
             # Update relay state
             relay["state"] = state
@@ -472,15 +412,4 @@ class RelayController:
         if "fan" in self.relays:
             self.set_relay("fan", True, manual=True, duration_minutes=30)
             
-    def reload_config(self):
-        """Reload configuration from file.
-        
-        Returns:
-            bool: True if successful
-        """
-        with self.lock:
-            # Clear current schedules
-            self.scheduler = schedule.Scheduler()
-            
-            # Reload configuration
-            return self._load_config()
+

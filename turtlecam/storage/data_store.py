@@ -28,7 +28,8 @@ class DataStore:
                  image_dir: str = "images",
                  archive_dir: str = "archive",
                  max_disk_usage_pct: float = 85.0,
-                 auto_cleanup: bool = True):
+                 auto_cleanup: bool = True,
+                 storage_config: dict = {}):
         """Initialize the data store.
         
         Args:
@@ -38,6 +39,7 @@ class DataStore:
             archive_dir (str): Directory for archived data
             max_disk_usage_pct (float): Maximum disk usage percentage
             auto_cleanup (bool): Enable automatic cleanup when disk usage exceeded
+            storage_config (dict): Storage-related configuration
         """
         # Set up paths
         self.base_path = Path(base_path).absolute()
@@ -48,6 +50,7 @@ class DataStore:
         # Configuration
         self.max_disk_usage_pct = max_disk_usage_pct
         self.auto_cleanup = auto_cleanup
+        self.storage_config = storage_config
         
         # Initialize storage
         self._init_storage()
@@ -79,6 +82,9 @@ class DataStore:
             ''')
             
             # Create motion_events table if not exists
+
+            
+            # Create motion_events table if not exists
             cursor.execute('''
             CREATE TABLE IF NOT EXISTS motion_events (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,24 +95,7 @@ class DataStore:
                 metadata        TEXT
             )
             ''')
-            
-            # Create crops table if not exists
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS crops (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                event_id        INTEGER REFERENCES motion_events(id),
-                timestamp       DATETIME NOT NULL,
-                crop_path       TEXT NOT NULL,
-                x               INTEGER,
-                y               INTEGER,
-                width           INTEGER,
-                height          INTEGER,
-                confidence      REAL,
-                label           TEXT,
-                is_archived     BOOLEAN DEFAULT 0
-            )
-            ''')
-            
+
             # Create env_log table if not exists
             cursor.execute('''
             CREATE TABLE IF NOT EXISTS env_log (
@@ -256,6 +245,24 @@ class DataStore:
             path.mkdir(parents=True, exist_ok=True)
             return path
         return self.archive_path
+
+    def log_env_reading(self, temperature: float, humidity: float, timestamp: datetime = None):
+        """Log an environmental reading to the database."""
+        if timestamp is None:
+            timestamp = datetime.now()
+
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO env_log (ts, temp_c, humidity_pct) VALUES (?, ?, ?)",
+                (timestamp.isoformat(), temperature, humidity),
+            )
+            conn.commit()
+            conn.close()
+            logger.debug(f"Logged env reading: {temperature}°C, {humidity}%")
+        except sqlite3.Error as e:
+            logger.error(f"Database error logging env reading: {e}")
     
     def log_motion_event(self, timestamp, duration=None, frame_count=None, gif_path=None, metadata=None):
         """Log a motion event to the database.
@@ -642,6 +649,10 @@ class DataStore:
             logger.error(f"Error checking disk usage: {e}")
             return {"error": str(e)}
     
+    def get_crop_store(self):
+        """Get the CropStore instance."""
+        return self.crop_store
+
     def log_ml_export(self, export_path, export_type, crop_count, start_date=None, end_date=None):
         """Log a machine learning data export.
         
