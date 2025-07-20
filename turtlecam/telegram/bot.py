@@ -357,16 +357,26 @@ class AsyncTelegramSender:
             logger.warning("Telegram bot loop not running. Cannot schedule task.")
 
     def send_message(self, *args, **kwargs):
-        """Send a text message."""
-        self._schedule_task(self.bot.send_message(*args, **kwargs))
+        """Schedule a message to be sent."""
+        self._schedule_task(self.bot.application.bot.send_message(*args, **kwargs))
+
+    def _send_file(self, file_type: str, *args, **kwargs):
+        """Internal helper to schedule a file to be sent."""
+        # Dynamically get the correct send method from the bot object
+        # e.g., bot.send_photo, bot.send_animation
+        send_method = getattr(self.bot.application.bot, f"send_{file_type}", None)
+        if send_method and callable(send_method):
+            self._schedule_task(send_method(*args, **kwargs))
+        else:
+            logger.error(f"Invalid file type specified: '{file_type}'. No such method on bot.")
 
     def send_photo(self, *args, **kwargs):
         """Send a photo."""
-        self._schedule_task(self.bot.send_photo(*args, **kwargs))
+        self._send_file('photo', *args, **kwargs)
 
     def send_gif(self, *args, **kwargs):
         """Send an animation (GIF)."""
-        self._schedule_task(self.bot.send_gif(*args, **kwargs))
+        self._send_file('animation', *args, **kwargs)
 
     def send_motion_alert(self, *args, **kwargs):
         """Send a motion alert with GIF."""

@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 # Import TurtleCam modules
 from turtlecam.config.config_manager import ConfigManager
 from turtlecam.vision.orchestrator import VisionOrchestrator
-from turtlecam.env_monitor.sensor import DHT22Sensor
+from turtlecam.env_monitor.sensor import DHT22Sensor, DHT_AVAILABLE
 from turtlecam.env_monitor.alerting import EnvAlertMonitor
 from turtlecam.relay.controller import RelayController
 from turtlecam.storage.data_store import DataStore
