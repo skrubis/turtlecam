@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/turtlecam
-ExecStart=/usr/bin/python3 -m turtlecam.main
+User=turtle
+WorkingDirectory=/home/turtle/turtlecam
+ExecStart=/home/turtle/turtlecam/venv/bin/python3 -m turtlecam.main
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1

@@ -13,6 +13,7 @@ import threading
 from pathlib import Path
 from datetime import datetime
 import signal
+from dotenv import load_dotenv
 
 # Import TurtleCam modules
 from turtlecam.config.config_manager import ConfigManager
@@ -137,22 +138,37 @@ class TurtleCam:
             )
             logger.info("Data store initialized")
             
-            # Initialize Telegram bot
-            testing_mode = self.config.get("system.testing_mode", False)
-            self.telegram_bot = TurtleBot(
-                token_file=self.config.get("telegram.token_file", ".env")
-            )
-            self.telegram_sender = AsyncTelegramSender(self.telegram_bot)
+            # Start Telegram bot if configured
+            token_file = self.config.get("telegram.token_file")
+            if token_file:
+                # Load environment variables from .env file
+                env_path = Path(token_file)
+                if env_path.exists():
+                    load_dotenv(dotenv_path=env_path)
+                    logger.info(f"Loaded environment variables from {env_path}")
+                else:
+                    logger.warning(f"Telegram token file not found at {env_path}")
+
+                bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+                chat_id = os.getenv("TELEGRAM_CHAT_ID")
+
+                if not bot_token or bot_token == "your_bot_token_here":
+                    logger.warning("TELEGRAM_BOT_TOKEN not found or not set in .env file. Telegram bot not starting.")
+                else:
+                    self.telegram_bot = TurtleBot(
+                        token=bot_token,
+                        chat_id=chat_id
+                    )
+                    self.telegram_sender = AsyncTelegramSender(self.telegram_bot)
             
             # Initialize components
             self._init_components()
             
-            # Start Telegram bot
-            self.telegram_bot.start()
-            logger.info("Telegram bot started")
-            
-            # Send startup notification
-            self.telegram_sender.send_message("🐢 TurtleCam system is starting up!")
+            # Start Telegram bot and send startup notification
+            if self.telegram_bot:
+                self.telegram_bot.start()
+                logger.info("Telegram bot started")
+                self.telegram_sender.send_message("🐢 TurtleCam system is starting up!")
             
             # Enter main loop
             self._main_loop()
