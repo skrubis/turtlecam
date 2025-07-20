@@ -13,6 +13,7 @@ A Raspberry Pi-based system that transforms a turtle terrarium into a "smart ter
 - **Storage Management**: Automatically compresses and archives old data to conserve space
 - **ML Export**: Tools for exporting captured data in YOLO format for machine learning projects
 - **Safety Features**: Automatic shutdown of heating elements during high temperature events
+- **Daily Statistics Reports**: Generates daily reports with activity patterns, environmental data, and historical comparisons
 
 ## Hardware Requirements
 
@@ -34,6 +35,7 @@ TurtleCam consists of the following key modules:
 5. **Data Store**: SQLite database and directory structure for data persistence
 6. **Time Sync**: Time synchronization with NTP and optional RTC hardware
 7. **Storage Manager**: Automatic data archiving, compression, and disk space management
+8. **Stats Reporter**: Daily statistics reporting with activity patterns and environmental data analysis
 
 ## Installation
 
@@ -55,7 +57,7 @@ sudo apt install -y chrony # For time synchronization
 
 ```bash
 # Clone the repository
-git clone https://github.com/username/turtlecam.git
+git clone https://github.com/skrubis/turtlecam.git
 cd turtlecam
 
 # Create and activate virtual environment
@@ -162,9 +164,34 @@ python -m turtlecam
 python -m turtlecam --config /path/to/custom/config.yaml
 ```
 
+### Generating Daily Reports
+
+Daily statistics reports are generated automatically each day (at the time specified in config.yaml). You can also generate reports manually:
+
+```bash
+# Generate a report for yesterday (default)
+python tools/generate_daily_report.py
+
+# Generate a report for a specific date
+python tools/generate_daily_report.py --date 2023-09-15
+
+# Generate a report without sending Telegram notifications
+python tools/generate_daily_report.py --no-telegram
+
+# Generate a report without charts
+python tools/generate_daily_report.py --no-charts
+
+# Specify a custom output directory
+python tools/generate_daily_report.py --output /path/to/reports
 ```
 
-### Telegram Bot Commands
+Reports include:
+- Movement activity statistics (total events, hourly distribution, peak activity hours)
+- Environmental data analysis (temperature and humidity averages, ranges, patterns)
+- Comparative analysis with previous day and weekly averages
+- Visual charts for activity patterns and environmental trends
+
+## Telegram Bot Commands
 
 Once running, interact with TurtleCam through these Telegram commands:
 
