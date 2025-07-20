@@ -42,7 +42,14 @@ class TurtleBot:
             relay_controller: Relay controller for light/heat control
         """
         self.token = token
-        self.chat_id = chat_id
+        # Ensure chat_id is an integer if it's a number, to support group chats
+        try:
+            self.chat_id = int(chat_id) if chat_id and chat_id.strip() else None
+            logger.info(f"Telegram chat ID set to: {self.chat_id}")
+        except (ValueError, TypeError):
+            logger.error(f"Invalid TELEGRAM_CHAT_ID: {chat_id}. It must be a number.")
+            self.chat_id = None
+
         self.vision_orchestrator = vision_orchestrator
         self.env_monitor = env_monitor
         self.relay_controller = relay_controller
@@ -63,6 +70,8 @@ class TurtleBot:
             "gif": "Create and send a GIF from recent frames",
             "relay": "Control relays (usage: /relay <name> on|off)",
         }
+        
+        self.running = False
         
     def _setup_handlers(self):
         """Set up command handlers for the bot."""
@@ -253,13 +262,16 @@ class TurtleBot:
         if self.application:
             # Start the bot in a new thread
             logger.info("Starting Telegram bot")
+            self.running = True
             self.application.run_polling(allowed_updates=Update.ALL_TYPES)
     
     def stop(self):
         """Stop the Telegram bot."""
-        if self.application:
-            logger.info("Stopping Telegram bot")
-            self.application.stop()
+        logger.info("Stopping Telegram bot")
+        if self.application and self.running:
+            # Run the async stop method in a blocking way
+            asyncio.run(self.application.stop())
+            self.running = False
             
     async def send_message(self, text: str, chat_id: str = None, parse_mode: str = None):
         """Send a text message.
