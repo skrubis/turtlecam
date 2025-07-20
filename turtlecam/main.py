@@ -180,79 +180,53 @@ class TurtleCam:
     def _init_components(self):
         """Initialize system components."""
         try:
+            testing_mode = self.config.get("system.testing_mode", False)
+
             # Initialize environmental sensor
-            sensor_pin = self.config.get("environment.sensor_pin", 4)
-            poll_interval = self.config.get("environment.poll_interval_sec", 60)
-            
             self.sensor = DHT22Sensor(
-                pin=sensor_pin,
-                poll_interval=poll_interval,
+                pin=self.config.get("environment.sensor_pin", 4),
+                poll_interval=self.config.get("environment.poll_interval_sec", 60),
                 db_path=self.data_store.db_path,
-                mock_mode=self.config.get("system.testing_mode", False)
+                mock_mode=testing_mode
             )
-            
-            # Start sensor
             self.sensor.start()
             logger.info("Environmental sensor started")
-            
+
             # Initialize environmental alerts
-            temp_low = self.config.get("environment.temp_low_threshold", 22.0)
-            temp_high = self.config.get("environment.temp_high_threshold", 33.0)
-            alert_cooldown = self.config.get("environment.alert_cooldown_min", 15)
-            
             self.alert_monitor = EnvAlertMonitor(
                 sensor=self.sensor,
                 telegram_sender=self.telegram_sender,
-                check_interval=poll_interval,
-                temp_low_threshold=temp_low,
-                temp_high_threshold=temp_high,
-                alert_cooldown_minutes=alert_cooldown
+                check_interval=self.config.get("environment.poll_interval_sec", 60),
+                temp_low_threshold=self.config.get("environment.temp_low_threshold", 22.0),
+                temp_high_threshold=self.config.get("environment.temp_high_threshold", 33.0),
+                alert_cooldown_minutes=self.config.get("environment.alert_cooldown_min", 15)
             )
-            
+
             # Initialize relay controller
-            relay_config_path = self.config.get("relay.config_path", "config/relay.yaml")
-            mock_mode = self.config.get("relay.mock_mode", False) or self.config.get("system.testing_mode", False)
-            
             self.relay = RelayController(
-                config_path=relay_config_path,
-                mock_mode=mock_mode
+                config_path=self.config.get("relay.config_path", "config/relay.yaml"),
+                mock_mode=self.config.get("relay.mock_mode", False) or testing_mode
             )
-            
-            # Register safety callback
+
+            # Register safety callback and start components
             self.alert_monitor.register_safety_callback(self.relay.handle_high_temperature)
-            
-            # Start alert monitor and relay
             self.alert_monitor.start()
             self.relay.start()
             logger.info("Relay controller and alert monitor started")
-            
+
             # Initialize vision system
-            camera_config = self.config.get_section("camera")
-            motion_config = self.config.get_section("motion")
-            
-            # Pass mock_mode from system if needed
-            if self.config.get("system.testing_mode", False):
-                camera_config["mock_mode"] = True
-                
-            # Get inactivity timeout
-            inactivity_timeout = motion_config.get("inactivity_timeout_sec", 10.0)
-            
-            # Initialize vision orchestrator
-            self.vision = VisionOrchestrator(
-                camera_config=camera_config,
-                motion_config=motion_config,
-                data_store=self.data_store,
-                telegram_sender=self.telegram_sender,
-                inactivity_timeout=inactivity_timeout
-            )
-            
-            # Start vision system
+            vision_config = self.config.get_section("vision")
+            vision_config['testing_mode'] = testing_mode
+            vision_config['data_store'] = self.data_store
+            vision_config['telegram_sender'] = self.telegram_sender
+
+            self.vision = VisionOrchestrator(**vision_config)
             self.vision.start()
             logger.info("Vision system started")
-            
+
             # Connect Telegram bot commands to components
             self._connect_telegram_commands()
-            
+
         except Exception as e:
             logger.error(f"Error initializing components: {e}", exc_info=True)
             raise
