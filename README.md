@@ -212,228 +212,162 @@ Once running, interact with TurtleCam through these Telegram commands:
 | `/status` | Get current system status including temperature/humidity readings |
 | `/photo` | Take and send a photo from the camera |
 | `/relays` | Show current state of all relays |
-| `/temp` | Get current temperature and humidity readings |
-| `/light on` | Turn light on (manual override) |
-| `/light off` | Turn light off (manual override) |
-| `/heat on` | Turn heating on (manual override) |
-| `/heat off` | Turn heating off (manual override) |
-| `/fan on` | Turn fan on (manual override) |
-| `/fan off` | Turn fan off (manual override) |
-| `/filter on` | Turn filter on (manual override) |
-| `/filter off` | Turn filter off (manual override) |
-| `/reset` | Clear all manual overrides and return to schedule |
-| `/help` | Show available commands |
-
-## Testing
-
-### Running Unit Tests
-
-TurtleCam includes a comprehensive test suite to ensure each module functions correctly:
-
-```bash
-# Run all tests
-python -m unittest discover -s tests
-
-# Run a specific test module
-python -m unittest tests.test_env_monitor
-
-# Run a specific test case
-python -m unittest tests.test_relay.TestRelayController.test_safety_shutdown
+```
+Arducam 64MP Camera
+       ↓
+VGA Preview (Motion Detection) → High-res Crops → GIF/Video Builder
+       ↓                              ↓                    ↓
+SQLite Database ←─────────────────────┘                    ↓
+                                                           ↓
+Telegram Bot ←─────────────────────────────────────────────┘
 ```
 
-### Mock Mode
+### Components
 
-For development and testing without actual hardware, use mock mode:
+- **`motion_detector.py`** - Background subtraction motion detection
+- **`gif_builder.py`** - Creates GIFs/videos from motion frames
+- **`telegram_bot.py`** - Handles Telegram commands and alerts
+- **`database.py`** - SQLite storage for detection metadata
+- **`archive_manager.py`** - Daily data compression and cleanup
+- **`config.py`** - Centralized configuration management
 
-```yaml
-# In config.yaml
-system:
-  mock_mode: true
+## File Structure
+
+```
+/opt/turtlecam/              # Application
+├── venv/                    # Python environment
+├── *.py                     # Application modules
+└── .env                     # Configuration
+
+/var/lib/turtle/             # Data storage
+├── frames/YYYY-MM-DD/       # Daily motion frames
+├── archives/                # Compressed archives
+└── detections.db           # SQLite database
+
+/var/log/turtle/             # Logs
+├── motion.log
+└── bot.log
 ```
 
-In mock mode:
-- DHT22 sensor readings are simulated with random values
-- GPIO pins aren't actually toggled
-- Camera operations use test images if available
+## Monitoring & Troubleshooting
 
-### Test Coverage
-
-To generate test coverage reports:
-
+### Check Services
 ```bash
-# Install coverage package
-pip install coverage
+# Service status
+sudo systemctl status turtle_motion.service turtle_bot.service
 
-# Run tests with coverage
-coverage run -m unittest discover
+# Live logs
+journalctl -u turtle_motion.service -f
+journalctl -u turtle_bot.service -f
 
-# Generate coverage report
-coverage report -m
-
-# Generate HTML coverage report
-coverage html
+# Restart services
+sudo systemctl restart turtle_motion.service turtle_bot.service
 ```
 
-## Troubleshooting
-
-### Common Issues
-
-#### Camera Not Working
-
+### Test Camera
 ```bash
-# Check if camera is detected
+# Test camera
+libcamera-hello --timeout 5000
+
+# Check detection
 vcgencmd get_camera
-# Should return: supported=1 detected=1
-
-# Make sure the camera interface is enabled
-sudo raspi-config
-# Navigate to Interface Options -> Camera and enable it
-
-# Check logs for camera errors
-journalctl -u turtlecam -f
 ```
 
-#### DHT22 Sensor Issues
+### Storage Management
+```bash
+# Check disk usage
+df -h /var/lib/turtle
+
+# Manual cleanup
+cd /opt/turtlecam && source venv/bin/activate
+python3 archive_manager.py --cleanup --max-age 14
+
+# Archive statistics
+python3 archive_manager.py --stats
+```
+
+### Test Telegram
+```bash
+# Test bot connectivity
+curl -s "https://api.telegram.org/bot<YOUR_TOKEN>/getMe"
+
+# Manual alert test
+cd /opt/turtlecam && source venv/bin/activate
+python3 telegram_bot.py --alert
+```
+
+## Performance Tuning
+
+### Optimize for Performance
+```bash
+# Increase GPU memory
+echo 'gpu_mem=128' | sudo tee -a /boot/config.txt
+
+# Performance CPU governor
+echo 'performance' | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+```
+
+### Optimize for Low Resources
+```bash
+# In .env file:
+MOTION_THRESHOLD=50          # Less sensitive
+ALERT_FPS=4.0               # Lower frame rate
+MAX_ALERT_FRAMES=8          # Fewer frames
+```
+
+## Development
+
+### Setup Development Environment
+```bash
+cd /opt/turtlecam
+source venv/bin/activate
+
+# Install development dependencies
+pip install pytest ruff
+
+# Run tests
+pytest tests/
+
+# Code formatting
+ruff format .
+ruff check .
+```
+
+### Manual Testing
+```bash
+# Test motion detection
+python3 motion_detector.py
+
+# Test GIF creation
+python3 gif_builder.py --frames 10
+
+# Test Telegram bot
+python3 telegram_bot.py
+```
+
+## Customization
+
+### Adjust for Different Turtle Species
+
+Edit motion detection parameters in `.env`:
 
 ```bash
-# Check if the I2C interface is enabled
-sudo raspi-config
+# For faster turtles (e.g., box turtles)
+INACTIVITY_TIMEOUT=4.0
+MOTION_THRESHOLD=20
 
-# Check I2C device detection
-i2cdetect -y 1
-
-# Check wiring connections (common issue)
-# DHT22 pin 1 -> 3.3V power
-# DHT22 pin 2 -> GPIO data pin (with 10k pull-up resistor)
-# DHT22 pin 3 -> not connected
-# DHT22 pin 4 -> Ground
+# For slower turtles (e.g., large tortoises)
+INACTIVITY_TIMEOUT=12.0
+MOTION_THRESHOLD=30
 ```
 
-#### Relay Control Problems
-
-- Verify GPIO pin numbers in config match your wiring
-- Check relay module is powered properly (some need separate power)
-- Ensure all ground connections are solid
-- If using a relay module with active-low triggers, adjust the `relay_active_low` setting
-
-#### System Time Issues
+### Enable ML Data Collection
 
 ```bash
-# Check NTP synchronization status
-timedatectl status
+# In .env file:
+SAVE_ML_FRAMES=true
+ML_FRAMES_PATH=/mnt/external/turtle_training_data
 
-# Check chronyd status
-systemctl status chronyd
-
-# If using DS3231, check if it's detected
-i2cdetect -y 1
-# Should show device at address 0x68
-```
-
-#### Log Files
-
-Check logs for debugging:
-
-```bash
-# View system service logs
-sudo journalctl -u turtlecam -f 
-
-# Check application logs in the data directory
-less data/turtlecam.log
-```
-
-## Soak Test Guide
-
-Before deploying TurtleCam long-term, perform a soak test to ensure stability.
-
-### Preparing for Soak Test
-
-1. **Configure mock environmental events**:
-   - Create a test script that simulates temperature fluctuations
-   - Schedule test relay activations at different times
-
-2. **Set up monitoring**:
-   - Enable detailed logging: `log_level: DEBUG` in config
-   - Configure log rotation to prevent filling storage
-   - Set up a secondary monitoring solution (optional)
-
-3. **Prepare storage for extended test**:
-   - Ensure sufficient free space (at least 10GB recommended)
-   - Configure aggressive storage management for testing:
-
-```yaml
-storage:
-  retention_days: 2  # More aggressive for testing
-  cleanup_threshold_pct: 70
-  target_usage_pct: 60
-  compress_older_than_days: 1
-```
-
-### Running the Soak Test
-
-1. **Start the system**:
-   ```bash
-   sudo systemctl start turtlecam
-   ```
-
-2. **Duration**:
-   - Minimum recommended test duration: 72 hours
-   - Ideal test duration: 7-14 days
-
-3. **Monitor key metrics**:
-   - CPU usage: `top`, `htop` or `mpstat`
-   - Memory usage: `free -m`
-   - Disk usage: `df -h`
-   - Temperature: `vcgencmd measure_temp`
-
-4. **Verification checks**:
-   - No memory leaks (stable RAM usage over time)
-   - No unexpected restarts
-   - All threads working correctly
-   - Data being recorded properly
-   - Telegram alerts functioning correctly
-   - Storage management working as expected
-
-### Analyzing Soak Test Results
-
-After completing the soak test:
-
-1. **Check logs for errors or warnings**:
-   ```bash
-   grep -E "ERROR|WARNING" data/turtlecam.log
-   ```
-
-2. **Verify database integrity**:
-   ```bash
-   sqlite3 data/turtlecam.db "PRAGMA integrity_check;"
-   ```
-
-3. **Review system statistics**:
-   - Check relay activation counts and timing
-   - Verify all scheduled events occurred
-   - Analyze any temperature alert patterns
-
-4. **Fine-tune settings**:
-   - Adjust polling intervals if needed
-   - Modify storage management parameters
-   - Update alert thresholds based on observations
-
-## Contributing
-
-Contributions to TurtleCam are welcome! Please follow these steps:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run tests to ensure quality
-5. Commit your changes (`git commit -m 'Add amazing feature'`)
-6. Push to your branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## License
-
-MIT
+# Mount external drive
+sudo mkdir -p /mnt/external
+sudo mount /dev/sda1 /mnt/external

@@ -1,12 +1,16 @@
-picamera2>=0.3.9
-opencv-python>=4.7.0
+# TurtleCam Dependencies
+# Core camera and computer vision
+picamera2>=0.3.12
+opencv-python>=4.8.0
 numpy>=1.24.0
-pillow>=10.0.0
-python-telegram-bot>=20.3
-pyyaml>=6.0
-imageio>=2.31.0
-RPi.GPIO>=0.7.1
-adafruit-circuitpython-dht>=3.7.0
-schedule>=1.2.0
-python-dotenv>=1.0.0
-astral>=3.2  # For sunrise/sunset calculations
+Pillow>=10.0.0
+
+# Telegram bot
+python-telegram-bot>=20.0
+
+# System monitoring
+psutil>=5.9.0
+
+# Development and testing
+pytest>=7.0.0
+ruff>=0.1.0

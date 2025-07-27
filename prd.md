@@ -1,16 +1,22 @@
-Turtle Controller – MVP Product Requirements Document (PRD)
+Turtle Controller – Vision‑Only MVP Product Requirements Document (PRD)
 
-1. Purpose
+Last updated: 27 Jul 2025
 
-Build a minimum‑viable product that transforms a Raspberry Pi‑based setup into an automated “smart terrarium” for a single turtle.  The system must:
+1  Purpose
 
-Monitor the animal with a 64 MP Arducam and automatically share motion GIFs via Telegram.
+Transform a Raspberry Pi 4 into an automated “smart terrarium” companion that:
 
-Control lighting/heat via relays, guided by a DHT22 temperature–humidity sensor.
+Detects turtle movement with a 64 MP Arducam.
 
-Persist sensor and vision data so a future release can retrain a single‑class Tiny‑YOLO model for more robust turtle detection.
+Builds a share‑worthy motion GIF.
 
-2. Goals & Success Metrics
+Pushes the GIF to Telegram within 30 seconds.
+
+Stores every motion frame + metadata locally for future Tiny‑YOLO re‑training.
+
+(No relay control, sensors or RTC hardware—lightweight vision first.)
+
+2  Goals & Success Metrics
 
 Goal
 
@@ -20,21 +26,15 @@ Target
 
 Timely alerts
 
-GIF posted to Telegram after motion
+GIF latency after motion
 
-< 30 s latency 95 % of events
+≤ 30 s for 95 % of events
 
-Environmental stability
+Dataset creation
 
-Temp inside 24 – 30 °C
+Unique labelled frames
 
-95 % of the time
-
-Data for future ML
-
-Number of labelled frames
-
-≥ 10 k unique frames in 3 months
+≥ 10 k in 3 months
 
 Reliability
 
@@ -42,179 +42,164 @@ Mean time between crashes
 
 ≥ 1 week continuous runtime
 
-3. Scope (MVP)
+3  Scope (MVP)
 
 Hardware
 
-Raspberry Pi 4 (4 GB RAM+)
+Raspberry Pi 4 (4 GB RAM or higher)
 
 Arducam 64 MP CSI‑2 camera
 
-DHT22 temperature‑humidity sensor
-
-2–4 ch 5 V relay board (lights, heater, fan)
-
-Optional 5 V fan for Pi cooling
-
-Optional DS3231 RTC hardware clock for offline time‑keeping
+(Optional) 5 V fan / heatsink for passive cooling
 
 Software Components
 
-Vision pipeline – Picamera2 preview (640×480) → motion detector → full‑res crop → GIF.
+Vision pipeline – Picamera2 preview → MotionDetector → CropStore → GIF Builder.
 
 Telegram Bot – python‑telegram‑bot for commands & alerts.
 
-Env Monitor – DHT22 polling, thresholds, logging.
+Data Store – SQLite database + image/archive directory.
 
-Relay Controller – scheduled + manual switching.
+Systemd Services – each component runs as a managed unit (see §4.4).
 
-Data Store – SQLite DB + image/archive directory.
+Time Sync – NTP via systemd-timesyncd; no RTC fallback.
 
-System Services – systemd units & YAML config.
+Out of Scope: environmental sensing, relay control, cloud sync, GPU acceleration, multi‑camera.
 
-Time Sync – chrony/NTP service with DS3231 RTC fallback.
+4  Functional Requirements
 
-Out of Scope (MVP)
+4.1 Vision & Alerts
 
-Cloud backup / remote firmware update.
+Frame rate – Preview at ≥ 10 FPS (640 × 480).
 
-Coral / GPU acceleration.
+Motion detection – Background subtraction with morphological filtering.
 
-Multi‑turtle or multi‑camera support.
+Trigger when blob area > 1000 px² and motion intensity > configurable threshold.
 
-4. Functional Requirements
+Dynamic cropping – Request full‑res crop (64 MP) with 15 % margin around the bounding box to keep the turtle centred.
 
-4.1 Vision & Alerts
+Buffering – Push crops to an in‑memory ring buffer.
 
-Capture preview at ≥ 8 FPS; detect motion via background subtraction.
+Inactivity timeout – If no new motion for 6 s (configurable), close the event.
 
-When bbox area > 800 px²:
+GIF assembly
 
-Request 64 MP crop using ScalerCrop ROI.
+Down‑sample to ≤ 1920 px width.
 
-Append to in‑memory buffer.
+Max 16 frames at 4 FPS → playback length ≤ 4 s.
 
-After N s of inactivity (configurable, default 8 s):
+For longer events, decimate frames (skip every n) to stay under 16‑frame cap.
 
-Assemble GIF (≤ 4 FPS, max 20 frames, 1920 px wide).
+Alert – Post GIF to Telegram chat with timestamp caption.
 
-Post to Telegram chat.
+Persistence – Save each crop as JPEG + JSON (timestamp, bbox) in /var/lib/turtle/frames/<date>/.
 
-Save each crop as JPEG + JSON metadata (timestamp, bbox).
-
-4.2 Environmental Monitoring
-
-Poll DHT22 every 60 s.
-
-Log timestamp, temp (°C), humidity (%) to SQLite.
-
-Alert Telegram if temp < 22 °C or > 33 °C.
-
-4.3 Relay Control
-
-Two named channels: daylight, uv_heat (+ optional fan).
-
-YAML schedule (cron‑style) with default:
-
-daylight: 08:00–20:00
-
-uv_heat: 09:00–18:00
-
-Manual overrides via bot commands (/relay <name> on|off).
-
-Safety: auto‑OFF if temp > 35 °C for > 5 min.
-
-4.4 Telegram Bot Commands
+4.2 Telegram Bot Commands
 
 Command
 
-Response
-
-/status
-
-Current temp/humidity + relay states
+Description
 
 /photo
 
-Instant still capture
+Capture & send a full‑res still
 
-/gif N
+/gif N
 
-Force GIF of last N frames (default 10)
-
-/relay <name> on/off
-
-Toggle relay
+Assemble and send last N buffered frames (default 10)
 
 /help
 
-Command list
+List available commands
 
-4.5 Data Collection for ML
+4.3 Data Collection for ML
 
-Store every preview frame that triggered motion plus its bbox.
+Store every triggering preview frame + bbox.
 
-Daily job packs frames into date‑stamped TAR file.
+Nightly turtle_pack.service compresses the day’s frames into a YYYY‑MM‑DD.tar.zst archive.
 
-Provide script export_yolo.py → images & YOLO txt labels for retraining.
+export_yolo.py converts archives → YOLO images/ & labels/ for re‑training.
 
-4.6 Time Synchronization
+4.4 Systemd Services
 
-System clock shall synchronise via chrony/NTP at boot and every hour thereafter.
+Each component is deployed as its own unit:
 
-If the network is unavailable, read time from the DS3231 RTC module; write‑back when the link returns.
+Unit
 
-All scheduled relay actions and data timestamps must rely on the synced clock.
+Type
 
-Clock accuracy requirement: drift < ±60 s after 24 h of network loss.
+Key Options
 
-4.7 Enhanced Relay Control
+turtle_motion.service
 
-Option to derive daylight and uv_heat schedules automatically from calculated sunrise/sunset for a user‑configured location.
+simple
 
-Fallback to the YAML cron schedule when geolocation is not set or calculation fails.
+ExecStart=/usr/bin/python3 motion_detector.py   Restart=on-failure RestartSec=3
 
-5. Non‑Functional Requirements Non‑Functional Requirements
+turtle_gif.service
 
-Performance: Average Pi CPU usage < 60 %, memory < 2 GB.
+oneshot
 
-Storage: Auto‑delete/raw compress vision data older than 30 days or when disk > 80 %.
+Triggered by motion via systemd-run or /gif command
 
-Maintainability: Code in Python 3.12, PEP‑8, MIT licence, GitHub CI (ruff, pytest).
+turtle_bot.service
 
-Security: Bot token stored in .env file, file permissions 600.
+simple
 
-Reliability: System recovers on power loss; services Restart=on-failure.
+ExecStart=/usr/bin/python3 telegram_bot.py  After=network-online.target
 
-6. Architecture Overview
+turtle_pack.timer & .service
 
-Pi 4
-├── picamera2  ↣  MotionDetector  ↣  CropStore
-│                               ↘  GIF Builder ↣ Telegram
-├── DHT22 Poller ↣ SQLite ↣ Alerting (temp)
-└── RelayAgent  ← Schedules / Bot commands
+timer
 
-Modular design means swapping MotionDetector with Tiny‑YOLO Detector later only touches that component.
+Packs & rotates archives daily at 02:00
 
-7. Data Model (SQLite)
+Common hardening for all units:
 
-CREATE TABLE env_log (
-  ts            DATETIME PRIMARY KEY,
-  temp_c        REAL,
-  humidity_pct  REAL
-);
+[Service]
+User=turtle
+Group=turtle
+LimitNOFILE=4096
+ProtectSystem=strict
+ReadWritePaths=/var/lib/turtle
+CPUAccounting=yes
+MemoryAccounting=yes
+StandardOutput=journal
+
+5  Non‑Functional Requirements
+
+Performance – Pi CPU < 60 %, RAM < 2 GB.
+
+Storage – Auto‑delete or compress vision data older than 30 days or when disk usage > 80 %.
+
+Maintainability – Python 3.12, PEP‑8, MIT licence, GitHub CI (ruff, pytest).
+
+Security – Bot token in .env (600 permissions); systemd ProtectSystem.
+
+Reliability – All services Restart=on-failure; systemd watchdog optional.
+
+6  Architecture Overview
+
+Pi 4
+├── picamera2 → MotionDetector → CropStore
+│                               ↘ GIF Builder → Telegram Bot
+└── nightly turtle_pack.timer → Archive → SQLite index
+
+Replacing MotionDetector with Tiny‑YOLO later keeps upstream/downstream unchanged.
+
+7  Data Model (SQLite)
 
 CREATE TABLE detections (
-  ts            DATETIME PRIMARY KEY,
-  bbox_x        INTEGER,
-  bbox_y        INTEGER,
-  bbox_w        INTEGER,
-  bbox_h        INTEGER,
-  confidence    REAL DEFAULT 1.0 -- placeholder for YOLO later,
-  img_path      TEXT
+  ts         DATETIME PRIMARY KEY,
+  bbox_x     INTEGER,
+  bbox_y     INTEGER,
+  bbox_w     INTEGER,
+  bbox_h     INTEGER,
+  confidence REAL DEFAULT 1.0,
+  img_path   TEXT
 );
 
-8. Milestones & Timeline (6 weeks)
+8  Milestones & Timeline (4 weeks)
 
 Week
 
@@ -222,29 +207,21 @@ Deliverable
 
 1
 
-Hardware assembled, OS flashed, camera + DHT22 verified
+Hardware & OS; camera streaming preview
 
 2
 
-Motion‑detect prototype saves crops locally
+Motion detection + CropStore saving locally
 
 3
 
-GIF builder & Telegram bot push alerts
+GIF builder + Telegram alerts; all systemd units active
 
 4
 
-Relay schedules + manual bot control
+48‑h soak test; doc + v0.1 tag
 
-5
-
-Data logging, rotation & config YAML
-
-6
-
-End‑to‑end soak test 48 h, documentation, v0.1 tag
-
-9. Risks & Mitigations
+9  Risks & Mitigations
 
 Risk
 
@@ -252,41 +229,37 @@ Impact
 
 Mitigation
 
-Pi overheats running CV + GIF
+Pi overheats during CV
 
-System crash
+System hang
 
-Heatsink + fan, CPU governor
-
-=
+Heatsink/fan; CPU governor
 
 Disk fills with images
 
 Alerts stop
 
-Rollover + age‑based deletion
+30‑day rotation + 80 % threshold
 
-Telegram API rate limits
+Telegram API limits
 
-Lost notifications
+Missed alerts
 
-Backoff + still‑image fallback
+Exponential backoff; still‑image fallback
 
 False positives (reflections)
 
 Spam GIFs
 
-Threshold tuning, future Tiny‑YOLO
+Threshold tuning; future Tiny‑YOLO
 
-10. Future Considerations (Post‑MVP)
+10  Future Considerations
 
-Tiny‑YOLO Detector – fine‑tune single‑class model with collected dataset; drop background subtractor.
+Replace background subtraction with Tiny‑YOLO.
 
-Edge Acceleration – explore USB Coral or Pi AI Kit for 30 FPS.
+Coral / Pi AI Kit for 30 FPS.
 
-Cloud Sync & Dashboard – push metrics to InfluxDB / Grafana Cloud.
+Cloud sync & dashboard.
 
-Multi‑camera Support – add overhead/basking camera views.
-
-Last updated: 27 Jun 2025
+Multi‑camera support
 
