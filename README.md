@@ -1,217 +1,113 @@
-# TurtleCam: Smart Turtle Terrarium Controller
+# TurtleCam 🐢
 
-A Raspberry Pi-based system that transforms a turtle terrarium into a "smart terrarium" with automated monitoring, environmental control, and alerts. TurtleCam captures moments when your turtle is active, monitors environmental conditions, and helps you maintain optimal habitat conditions through automated control systems.
+A smart terrarium monitoring system for Hermann's tortoises using Raspberry Pi 4 and Arducam Hawkeye 64MP camera. Automatically detects turtle movement, creates motion GIFs/videos, and sends alerts via Telegram.
 
 ## Features
 
-- **Motion Detection**: Uses a 64MP Arducam to detect turtle activity and capture high-resolution images
-- **Telegram Integration**: Automatically shares motion GIFs and allows remote control via a Telegram bot
-- **Environmental Control**: Monitors temperature and humidity with DHT22 sensor
-- **Automated Light & Heat**: Controls lighting and heating via relay board on a schedule
-- **Data Collection**: Stores sensor data and images for future ML training
-- **Time Synchronization**: Maintains accurate time with NTP and optional DS3231 RTC hardware clock
-- **Storage Management**: Automatically compresses and archives old data to conserve space
-- **ML Export**: Tools for exporting captured data in YOLO format for machine learning projects
-- **Safety Features**: Automatic shutdown of heating elements during high temperature events
-- **Daily Statistics Reports**: Generates daily reports with activity patterns, environmental data, and historical comparisons
+- 🎥 **Motion Detection** - Background subtraction optimized for turtle behavior
+- 📱 **Telegram Integration** - Real-time alerts and remote commands
+- 🎬 **Automated GIF/Video Creation** - High-quality motion summaries
+- 📊 **Data Collection** - Frame storage for future ML training (optional)
+- ⚙️ **Systemd Services** - Reliable, auto-restarting system services
+- 🗜️ **Smart Archiving** - Automatic data compression and cleanup
 
 ## Hardware Requirements
 
-- Raspberry Pi 4 (4GB RAM or higher)
-- Arducam 64MP CSI-2 camera
-- DHT22 temperature-humidity sensor
-- 2-4 channel 5V relay board
-- Optional: 5V fan for Pi cooling
-- Optional: DS3231 RTC hardware clock
+- **Raspberry Pi 4** (4GB RAM or higher recommended)
+- **Arducam Hawkeye 64MP CSI-2 camera**
+- **MicroSD card** (32GB or larger)
+- **Optional**: Heatsink/fan for thermal management
 
-## System Architecture
+## Quick Start
 
-TurtleCam consists of the following key modules:
-
-1. **Vision Pipeline**: Motion detection, camera control, GIF creation, and crop storage
-2. **Telegram Bot**: Alert notifications, remote commands, and configuration management
-3. **Environmental Monitor**: DHT22 sensor polling, temperature/humidity logging, and alert monitoring
-4. **Relay Controller**: Scheduled and manual control of lights, heating, filtration, and fans
-5. **Data Store**: SQLite database and directory structure for data persistence
-6. **Time Sync**: Time synchronization with NTP and optional RTC hardware
-7. **Storage Manager**: Automatic data archiving, compression, and disk space management
-8. **Stats Reporter**: Daily statistics reporting with activity patterns and environmental data analysis
-
-## Installation
-
-### Prerequisites
+### 1. Prepare Raspberry Pi
 
 ```bash
-# Enable camera and I2C interface on Raspberry Pi
-sudo raspi-config
-# Navigate to Interface Options and enable Camera and I2C
+# Update system
+sudo apt update && sudo apt upgrade -y
 
-# Install required system packages
-sudo apt update
-sudo apt install -y python3-pip python3-venv libopenjp2-7 libatlas-base-dev
-sudo apt install -y i2c-tools libilmbase-dev libopenexr-dev libgstreamer1.0-dev
-sudo apt install -y chrony # For time synchronization
+# Create turtle user
+sudo useradd -m -s /bin/bash turtle
+sudo usermod -aG video,gpio turtle
 ```
 
-### Installation Steps
+### 2. Setup Arducam Hawkeye Camera
+
+Follow the [official Arducam guide](https://docs.arducam.com/Raspberry-Pi-Camera/Native-camera/64MP-Hawkeye/) to:
+- Enable camera interface (`sudo raspi-config`)
+- Install camera drivers
+- Test with `libcamera-hello --timeout 5000`
+
+### 3. Install TurtleCam
 
 ```bash
-# Clone the repository
-git clone https://github.com/skrubis/turtlecam.git
+# Switch to turtle user
+sudo su - turtle
+
+# Clone and install
+git clone <your-repo-url> turtlecam
 cd turtlecam
+./install.sh
+```
 
-# Create a virtual environment
-python3 -m venv venv
+### 4. Configure Telegram
 
-# Activate the virtual environment
-# On Linux/macOS:
-source venv/bin/activate
-# On Windows:
-.\venv\Scripts\activate
+1. **Create Bot**: Message @BotFather → `/newbot` → save token
+2. **Get Chat ID**: Message your bot, then visit:
+   ```
+   https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates
+   ```
+3. **Configure**: Edit `/opt/turtlecam/.env`:
+   ```bash
+   TELEGRAM_BOT_TOKEN=your_bot_token_here
+   TELEGRAM_CHAT_ID=your_chat_id_here  # Can be negative for groups
+   ```
 
-# Install dependencies
-pip install -r requirements.txt
+### 5. Start Services
 
-# Configure your environment by copying the example files.
-# On Linux/macOS:
-cp .env.example .env
-cp config.example.yaml config.yaml
-
-# On Windows:
-copy .env.example .env
-copy config.example.yaml config.yaml
-
-# Edit .env with your Telegram bot token and chat ID.
-# Edit config.yaml to customize your setup (e.g., camera, sensors).
+```bash
+sudo systemctl start turtle_motion.service turtle_bot.service turtle_pack.timer
+sudo systemctl status turtle_motion.service turtle_bot.service
 ```
 
 ## Configuration
 
-TurtleCam uses YAML configuration files with sensible defaults. Edit `config.yaml` to customize your setup:
+All settings are configured via `/opt/turtlecam/.env`:
 
-### Core Configuration
-
-```yaml
-# Main configuration parameters
-system:
-  mock_mode: false  # Set to true for development without hardware
-  log_level: INFO   # DEBUG, INFO, WARNING, ERROR
-  base_path: data   # Base directory for data storage
-
-# Camera settings
-camera:
-  resolution: [2048, 1536]  # Camera resolution
-  framerate: 15             # Framerate in fps
-  rotation: 0               # Camera rotation (0, 90, 180, 270)
-```
-
-### Environmental Settings
-
-```yaml
-# Environmental monitor settings
-environment:
-  sensor_pin: 4             # GPIO pin for DHT22 sensor
-  poll_interval: 60         # Seconds between readings
-  min_temp: 20              # Minimum safe temperature (°C)
-  max_temp: 32              # Maximum safe temperature (°C)
-  alert_cooldown: 3600      # Seconds between repeat alerts
-```
-
-### Relay Control
-
-```yaml
-# Relay control configuration
-relay:
-  pins:                      # GPIO pins for relays
-    light: 17
-    heat: 27
-    filter: 22
-    fan: 23
-  schedule:                  # Daily schedule
-    light:
-      - {on: "08:00", off: "20:00"}
-    heat:
-      - {on: "06:00", off: "22:00", condition: "temp_below:26"}
-    filter:
-      - {on: "00:00", off: "23:59"}
-    fan:
-      - {on: "12:00", off: "14:00"}
-      - {on: "18:00", off: "20:00"}
-```
-
-## Usage
-
-### Running as a Service (Linux/Raspberry Pi Only)
-
-To install TurtleCam as a systemd service for automatic startup on a Linux system, use the following commands. This is the recommended way to run the application on a Raspberry Pi.
-
+### Required
 ```bash
-# Copy the service file (note the correct path)
-sudo cp systemd/turtlecam.service /etc/systemd/system/
-
-# Reload the systemd daemon, enable and start the service
-sudo systemctl daemon-reload
-sudo systemctl enable turtlecam.service
-sudo systemctl start turtlecam.service
-
-# Check the status of the service
-sudo systemctl status turtlecam.service
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
 ```
 
-### Manual Running
-
-To run the application manually from the command line for development or testing:
-
+### Optional (with defaults)
 ```bash
-# Activate the virtual environment
-# On Linux/macOS:
-source venv/bin/activate
-# On Windows:
-.\venv\Scripts\activate
+# Motion Detection
+MOTION_THRESHOLD=25              # Sensitivity (lower = more sensitive)
+INACTIVITY_TIMEOUT=8.0          # Seconds to end motion event
 
-# Start the main application
-python -m turtlecam.main
+# Alert Settings
+ALERT_FORMAT=gif                 # "gif" or "mp4"
+ALERT_FPS=8.0                   # Playback frame rate
 
-# Or with a custom config path
-python -m turtlecam.main --config /path/to/custom/config.yaml
+# ML Training Data (disabled by default)
+SAVE_ML_FRAMES=false
+ML_FRAMES_PATH=/mnt/external/turtle_ml_data
+
+# System
+LOG_LEVEL=INFO
 ```
 
-### Generating Daily Reports
+## Telegram Commands
 
-Daily statistics reports are generated automatically each day (at the time specified in config.yaml). You can also generate reports manually:
+- `/photo` - Capture full-resolution still image
+- `/gif [N]` - Create GIF from last N frames (default: 10)
+- `/stats` - Show detection statistics
+- `/status` - Show system status and resource usage
+- `/help` - List all commands
 
-```bash
-# Generate a report for yesterday (default)
-python tools/generate_daily_report.py
+## System Architecture
 
-# Generate a report for a specific date
-python tools/generate_daily_report.py --date 2023-09-15
-
-# Generate a report without sending Telegram notifications
-python tools/generate_daily_report.py --no-telegram
-
-# Generate a report without charts
-python tools/generate_daily_report.py --no-charts
-
-# Specify a custom output directory
-python tools/generate_daily_report.py --output /path/to/reports
-```
-
-Reports include:
-- Movement activity statistics (total events, hourly distribution, peak activity hours)
-- Environmental data analysis (temperature and humidity averages, ranges, patterns)
-- Comparative analysis with previous day and weekly averages
-- Visual charts for activity patterns and environmental trends
-
-## Telegram Bot Commands
-
-Once running, interact with TurtleCam through these Telegram commands:
-
-| Command | Description |
-|---------|-------------|
-| `/status` | Get current system status including temperature/humidity readings |
-| `/photo` | Take and send a photo from the camera |
-| `/relays` | Show current state of all relays |
 ```
 Arducam 64MP Camera
        ↓
@@ -343,6 +239,9 @@ python3 gif_builder.py --frames 10
 
 # Test Telegram bot
 python3 telegram_bot.py
+
+# Run system validation
+python3 test_system.py
 ```
 
 ## Customization
@@ -371,3 +270,171 @@ ML_FRAMES_PATH=/mnt/external/turtle_training_data
 # Mount external drive
 sudo mkdir -p /mnt/external
 sudo mount /dev/sda1 /mnt/external
+
+# Add to /etc/fstab for permanent mounting
+echo '/dev/sda1 /mnt/external ext4 defaults 0 2' | sudo tee -a /etc/fstab
+```
+
+## Troubleshooting Common Issues
+
+### "No camera detected"
+- Check CSI cable connection
+- Enable camera: `sudo raspi-config` → Interface Options → Camera
+- Reboot after enabling
+
+### "Motion detection not working"
+- Check camera preview: `libcamera-hello`
+- Adjust `MOTION_THRESHOLD` in `.env`
+- Check logs: `journalctl -u turtle_motion.service`
+
+### "Telegram bot not responding"
+- Verify bot token and chat ID
+- Test connectivity: `curl https://api.telegram.org/bot<TOKEN>/getMe`
+- Check logs: `journalctl -u turtle_bot.service`
+
+### "Disk space full"
+- Run cleanup: `python3 archive_manager.py --cleanup`
+- Check settings: `ML_FRAMES_PATH` pointing to external drive
+- Reduce `MAX_AGE_DAYS` in config
+
+### "High CPU usage"
+- Lower preview FPS in config
+- Increase `MOTION_THRESHOLD`
+- Check for memory leaks in logs
+
+### "False motion alerts"
+- Increase `MOTION_THRESHOLD`
+- Adjust `MIN_BLOB_AREA`
+- Check for reflections or lighting changes
+
+## Service Management
+
+### Systemd Services
+
+The system runs three main services:
+
+- **`turtle_motion.service`** - Motion detection and frame capture
+- **`turtle_bot.service`** - Telegram bot for commands and alerts
+- **`turtle_pack.timer`** - Daily archiving (runs at 2:00 AM)
+
+### Service Commands
+```bash
+# Start services
+sudo systemctl start turtle_motion.service turtle_bot.service
+
+# Stop services
+sudo systemctl stop turtle_motion.service turtle_bot.service
+
+# Enable auto-start on boot
+sudo systemctl enable turtle_motion.service turtle_bot.service turtle_pack.timer
+
+# Check service status
+sudo systemctl status turtle_motion.service
+
+# View service logs
+journalctl -u turtle_motion.service --since "1 hour ago"
+
+# Restart failed services
+sudo systemctl restart turtle_motion.service
+```
+
+## Data Management
+
+### Archive System
+
+TurtleCam automatically manages data storage:
+
+- **Daily frames** stored in `/var/lib/turtle/frames/YYYY-MM-DD/`
+- **Automatic archiving** compresses old data into `.tar.zst` files
+- **Cleanup** removes data older than 30 days (configurable)
+- **ML frames** optionally saved to external drive
+
+### Manual Archive Operations
+```bash
+cd /opt/turtlecam && source venv/bin/activate
+
+# Archive specific date
+python3 archive_manager.py --archive-date 2024-01-15
+
+# Show archive statistics
+python3 archive_manager.py --stats
+
+# Extract archive for inspection
+python3 archive_manager.py --extract 2024-01-15.tar.zst
+
+# Force cleanup with custom age
+python3 archive_manager.py --cleanup --max-age 7
+```
+
+## Security Considerations
+
+### Systemd Hardening
+
+Services run with security hardening:
+- Non-root user (`turtle`)
+- Restricted file system access
+- No new privileges
+- Private temporary directories
+- Resource accounting enabled
+
+### Network Security
+
+- Bot token stored in protected `.env` file (600 permissions)
+- No external network services exposed
+- Telegram communication over HTTPS only
+
+### File Permissions
+```bash
+# Secure configuration file
+sudo chmod 600 /opt/turtlecam/.env
+sudo chown turtle:turtle /opt/turtlecam/.env
+
+# Secure data directory
+sudo chmod 755 /var/lib/turtle
+sudo chown -R turtle:turtle /var/lib/turtle
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create feature branch: `git checkout -b feature/amazing-feature`
+3. Commit changes: `git commit -m 'Add amazing feature'`
+4. Push branch: `git push origin feature/amazing-feature`
+5. Open Pull Request
+
+### Development Guidelines
+
+- Follow PEP 8 style guidelines
+- Add tests for new features
+- Update documentation
+- Test on actual Raspberry Pi hardware when possible
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- **Arducam** for the excellent 64MP camera module
+- **Raspberry Pi Foundation** for the platform
+- **python-telegram-bot** library maintainers
+- **OpenCV** community
+
+## Support
+
+For support, please:
+1. Check the troubleshooting section
+2. Search existing GitHub issues
+3. Create a new issue with detailed information
+
+Include the following in bug reports:
+- Raspberry Pi model and OS version
+- Camera model and connection
+- Relevant log excerpts
+- Configuration settings (without sensitive tokens)
+
+---
+
+**Happy turtle watching! 🐢📸**
+
+*Optimized for Hermann's tortoises but adaptable for other species.*
