@@ -60,12 +60,13 @@ class MotionDetector:
         try:
             self.camera = Picamera2()
             
-            # Configure high-resolution stream for motion detection (4K)
+            # Configure high-resolution stream for motion detection with memory optimization
             motion_config = self.camera.create_preview_configuration(
                 main={
                     "size": (config.camera.motion_width, config.camera.motion_height),
                     "format": "RGB888"
-                }
+                },
+                buffer_count=2  # Minimize buffer count to reduce memory usage
             )
             
             self.camera.configure(motion_config)
@@ -84,6 +85,9 @@ class MotionDetector:
             logger.info(f"Camera configured: Ultra-high-res motion detection {config.camera.motion_width}x{config.camera.motion_height} @ {config.camera.motion_fps}fps")
             
         except Exception as e:
+            if "Cannot allocate memory" in str(e):
+                logger.error(f"Camera memory allocation failed. Try: sudo raspi-config -> Advanced -> Memory Split -> 128 or 256")
+                logger.error(f"Or reduce resolution in config.py: motion_width/height")
             logger.error(f"Failed to setup camera: {e}")
             raise
     
