@@ -12,11 +12,15 @@ from dotenv import load_dotenv
 
 @dataclass
 class CameraConfig:
-    """Camera and high-resolution settings (RPi4 memory optimized)"""
-    # High-res motion detection (balanced for RPi4 memory limits)
-    motion_width: int = 2560   # 2.5K width (manageable for RPi4)
-    motion_height: int = 1440  # 2.5K height (1440p)
-    motion_fps: int = 3        # Low FPS for stability (turtle == slow)
+    """Camera and still frame settings (high-res with 256M GPU memory)"""
+    # High-res still frame capture for turtle motion detection (1fps = we can go big!)
+    motion_width: int = 4608   # 4.6K width (half of 64MP width for stability)
+    motion_height: int = 3472  # 4.6K height (half of 64MP height)
+    motion_fps: int = 1        # Ultra-low FPS allows high resolution
+    
+    # Still frame comparison settings (optimized for 4.6K resolution)
+    frame_comparison_threshold: float = 3.0  # % difference to trigger motion (lower for high-res sensitivity)
+    still_frame_interval: float = 0.8       # Slightly faster captures for better turtle tracking
     
     # Full resolution for special captures (if needed)
     full_res_width: int = 9152  # Arducam Hawkeye 64MP

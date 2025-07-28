@@ -39,21 +39,15 @@ class MotionDetector:
     
     def __init__(self):
         self.camera = None
-        self.background_subtractor = None
-        self.running = False
-        self.motion_event = Event()
-        
-        # Frame buffers
-        self.motion_frames = Queue(maxsize=config.alert.max_frames * 2)
-        self.current_event_frames = []
-        
-        # Timing
+        self.previous_frame = None  # Store previous still frame for comparison
+        self.motion_frames = []
         self.last_motion_time = 0
-        self.event_start_time = 0
+        self.motion_event_active = False
+        self.last_capture_time = 0
+        self.setup_camera()
         
-        # Initialize camera
+        # Initialize camera for still frame capture
         self._setup_camera()
-        self._setup_background_subtractor()
     
     def _setup_camera(self):
         """Initialize Picamera2 with preview and full-res configurations"""
@@ -132,49 +126,64 @@ class MotionDetector:
         return False
     
     def _preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
-        """Preprocess frame for motion detection with corruption filtering"""
-        # Check for frame corruption first
-        if self._is_frame_corrupted(frame):
-            logger.warning("Corrupted frame detected, skipping")
-            return None
+        """Preprocess frame for motion detection (RGB to grayscale)"""
+        try:
+            # Convert to grayscale for motion detection
+            gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
             
-        # Convert to grayscale for motion detection
-        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-        
-        # Apply Gaussian blur to reduce noise (stronger for high-res)
-        blurred = cv2.GaussianBlur(gray, (7, 7), 0)
-        
-        return blurred
+            # Apply Gaussian blur to reduce noise (stronger for high-res)
+            blurred = cv2.GaussianBlur(gray, (7, 7), 0)
+            
+            return blurred
+        except Exception as e:
+            logger.error(f"Frame preprocessing failed: {e}")
+            return None
     
-    def _detect_motion(self, frame: np.ndarray) -> Tuple[bool, Optional[Tuple[int, int, int, int]]]:
-        """Detect motion and return bounding box if found"""
-        processed_frame = self._preprocess_frame(frame)
-        
-        # Apply background subtraction
-        fg_mask = self.background_subtractor.apply(processed_frame)
-        
-        # Morphological operations to reduce noise
-        kernel = cv2.getStructuringElement(
-            cv2.MORPH_ELLIPSE, 
-            (config.motion.morphology_kernel_size, config.motion.morphology_kernel_size)
-        )
-        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
-        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel)
-        
-        # Find contours
-        contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        # Filter contours by area
-        valid_contours = [c for c in contours if cv2.contourArea(c) > config.motion.min_blob_area]
-        
-        if not valid_contours:
+    def _compare_still_frames(self, current_frame: np.ndarray, previous_frame: np.ndarray) -> Tuple[bool, Optional[Tuple[int, int, int, int]]]:
+        """Compare two still frames to detect significant motion (turtle movement)"""
+        try:
+            # Convert both frames to grayscale for comparison
+            current_gray = cv2.cvtColor(current_frame, cv2.COLOR_RGB2GRAY)
+            previous_gray = cv2.cvtColor(previous_frame, cv2.COLOR_RGB2GRAY)
+            
+            # Calculate absolute difference between frames
+            diff = cv2.absdiff(current_gray, previous_gray)
+            
+            # Apply threshold to get binary difference image
+            _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+            
+            # Apply morphological operations to clean up noise
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+            thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+            thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+            
+            # Calculate percentage of changed pixels
+            total_pixels = thresh.shape[0] * thresh.shape[1]
+            changed_pixels = cv2.countNonZero(thresh)
+            change_percentage = (changed_pixels / total_pixels) * 100
+            
+            logger.debug(f"Frame difference: {change_percentage:.2f}% changed pixels")
+            
+            # Check if change exceeds threshold (turtle moved significantly)
+            if change_percentage > config.camera.frame_comparison_threshold:
+                # Find contours in the difference image
+                contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                
+                # Filter contours by area (turtle-sized movements)
+                valid_contours = [c for c in contours if cv2.contourArea(c) > config.motion.min_blob_area]
+                
+                if valid_contours:
+                    # Get the largest contour (main turtle movement)
+                    largest_contour = max(valid_contours, key=cv2.contourArea)
+                    x, y, w, h = cv2.boundingRect(largest_contour)
+                    logger.info(f"Turtle motion detected: {change_percentage:.2f}% change, bbox: ({x},{y},{w},{h})")
+                    return True, (x, y, w, h)
+            
             return False, None
-        
-        # Find the largest contour (most likely the turtle)
-        largest_contour = max(valid_contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(largest_contour)
-        
-        return True, (x, y, w, h)
+            
+        except Exception as e:
+            logger.error(f"Still frame comparison error: {e}")
+            return False, None
     
     def _create_high_res_crop(self, frame: np.ndarray, bbox: Tuple[int, int, int, int]) -> Optional[np.ndarray]:
         """Create high-resolution crop from 4K motion frame"""
@@ -316,20 +325,36 @@ class MotionDetector:
             self.camera.start()
             
             while self.running:
-                # Capture preview frame
-                frame = self.camera.capture_array("main")
                 current_time = time.time()
                 timestamp = datetime.now()
                 
-                # Preprocess frame (includes corruption detection)
-                processed_frame = self._preprocess_frame(frame)
-                
-                # Skip corrupted frames
-                if processed_frame is None:
+                # Check if it's time to capture a new still frame
+                if current_time - self.last_capture_time < config.camera.still_frame_interval:
+                    time.sleep(0.1)  # Small sleep to prevent CPU spinning
                     continue
                 
-                # Detect motion
-                has_motion, bbox = self._detect_motion(processed_frame)
+                # Capture still frame (memory efficient single capture)
+                frame = self.camera.capture_array("main")
+                self.last_capture_time = current_time
+                
+                logger.debug(f"Captured still frame at {timestamp}")
+                
+                # Check for frame corruption
+                if self._is_frame_corrupted(frame):
+                    logger.warning("Corrupted frame detected, skipping")
+                    continue
+                
+                # Compare with previous frame if we have one
+                has_motion = False
+                bbox = None
+                
+                if self.previous_frame is not None:
+                    has_motion, bbox = self._compare_still_frames(frame, self.previous_frame)
+                else:
+                    logger.info("First frame captured, storing as reference")
+                
+                # Store current frame as previous for next comparison
+                self.previous_frame = frame.copy()
                 
                 if has_motion:
                     logger.debug(f"Motion detected: {bbox}")
