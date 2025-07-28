@@ -44,8 +44,6 @@ class MotionDetector:
         self.last_motion_time = 0
         self.motion_event_active = False
         self.last_capture_time = 0
-        self.setup_camera()
-        
         # Initialize camera for still frame capture
         self._setup_camera()
     
