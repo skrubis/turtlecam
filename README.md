@@ -38,7 +38,7 @@ sudo usermod -aG video,gpio turtle
 Follow the [official Arducam guide](https://docs.arducam.com/Raspberry-Pi-Camera/Native-camera/64MP-Hawkeye/) to:
 - Enable camera interface (`sudo raspi-config`)
 - Install camera drivers
-- Test with `libcamera-hello --timeout 5000`
+- Test with `rpicam-hello --timeout 5000` (or `libcamera-hello` on older OS)
 
 ### 3. Install TurtleCam
 
@@ -164,8 +164,11 @@ sudo systemctl restart turtle_motion.service turtle_bot.service
 
 ### Test Camera
 ```bash
-# Test camera
-libcamera-hello --timeout 5000
+# Test camera (newer OS)
+rpicam-hello --timeout 5000
+
+# Or on older OS:
+# libcamera-hello --timeout 5000
 
 # Check detection
 vcgencmd get_camera
@@ -282,10 +285,11 @@ echo '/dev/sda1 /mnt/external ext4 defaults 0 2' | sudo tee -a /etc/fstab
 ### "No camera detected"
 - Check CSI cable connection
 - Enable camera: `sudo raspi-config` → Interface Options → Camera
+- Test: `rpicam-hello --timeout 5000` (or `libcamera-hello` on older OS)
 - Reboot after enabling
 
 ### "Motion detection not working"
-- Check camera preview: `libcamera-hello`
+- Check camera preview: `rpicam-hello` (or `libcamera-hello` on older OS)
 - Adjust `MOTION_THRESHOLD` in `.env`
 - Check logs: `journalctl -u turtle_motion.service`
 
