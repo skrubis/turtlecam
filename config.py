@@ -17,9 +17,9 @@ class CameraConfig:
     capture_width: int = 4608   # 4.6K width for crop source
     capture_height: int = 3472  # 4.6K height for crop source
     
-    # Low-res comparison for fast motion detection (resize from high-res)
-    comparison_width: int = 1152  # 1/4 of capture width (fast processing)
-    comparison_height: int = 868  # 1/4 of capture height
+    # Tiny comparison for ultra-fast motion detection (resize from high-res)
+    comparison_width: int = 320   # Tiny width (100x faster than 4.6K)
+    comparison_height: int = 240  # Tiny height (VGA-like for speed)
     motion_fps: int = 1          # Ultra-low FPS
     
     # Still frame comparison settings (optimized for 4.6K resolution)

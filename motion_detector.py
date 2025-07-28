@@ -7,12 +7,13 @@ import cv2
 import numpy as np
 import logging
 import time
+import gc
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Tuple, List
 from threading import Thread, Event
 from queue import Queue, Empty
 import json
-from pathlib import Path
 
 from picamera2 import Picamera2
 from config import config
@@ -145,12 +146,14 @@ class MotionDetector:
     def _compare_still_frames(self, current_frame: np.ndarray, previous_frame: np.ndarray) -> Tuple[bool, Optional[Tuple[int, int, int, int]]]:
         """Compare two still frames using low-res comparison for speed"""
         try:
-            # Resize frames to low-res for fast comparison (4.6K -> 1.2K)
+            # Ultra-fast resize to tiny frames (4.6K -> 320x240 = 200x faster!)
             comparison_size = (config.camera.comparison_width, config.camera.comparison_height)
-            current_small = cv2.resize(current_frame, comparison_size, interpolation=cv2.INTER_AREA)
-            previous_small = cv2.resize(previous_frame, comparison_size, interpolation=cv2.INTER_AREA)
             
-            # Convert resized frames to grayscale for comparison
+            # Use fastest interpolation for speed
+            current_small = cv2.resize(current_frame, comparison_size, interpolation=cv2.INTER_NEAREST)
+            previous_small = cv2.resize(previous_frame, comparison_size, interpolation=cv2.INTER_NEAREST)
+            
+            # Convert tiny frames to grayscale (much faster on 320x240)
             current_gray = cv2.cvtColor(current_small, cv2.COLOR_RGB2GRAY)
             previous_gray = cv2.cvtColor(previous_small, cv2.COLOR_RGB2GRAY)
             
@@ -375,8 +378,21 @@ class MotionDetector:
                 else:
                     logger.info("First frame captured, storing as reference")
                 
-                # Store current frame as previous for next comparison
+                # Store current frame as previous for next comparison (memory efficient)
+                # Delete old frame first to free memory immediately
+                if self.previous_frame is not None:
+                    del self.previous_frame
                 self.previous_frame = frame.copy()
+                
+                # Force garbage collection every 10 frames to prevent memory buildup
+                if hasattr(self, '_frame_count'):
+                    self._frame_count += 1
+                else:
+                    self._frame_count = 1
+                    
+                if self._frame_count % 10 == 0:
+                    gc.collect()  # Force garbage collection
+                    logger.debug(f"Memory cleanup after {self._frame_count} frames")
                 
                 if has_motion:
                     logger.debug(f"Motion detected: {bbox}")
