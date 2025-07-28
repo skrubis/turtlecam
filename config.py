@@ -12,13 +12,19 @@ from dotenv import load_dotenv
 
 @dataclass
 class CameraConfig:
-    """Camera and preview settings"""
-    preview_width: int = 640
-    preview_height: int = 480
-    preview_fps: int = 15
+    """Camera and high-resolution settings"""
+    # High-res motion detection (4K for good balance of quality vs performance)
+    motion_width: int = 3840  # 4K width
+    motion_height: int = 2160  # 4K height
+    motion_fps: int = 10  # Lower FPS for high-res processing
+    
+    # Full resolution for special captures (if needed)
     full_res_width: int = 9152  # Arducam Hawkeye 64MP
     full_res_height: int = 6944
+    
+    # Alert settings
     crop_margin_percent: float = 15.0  # Margin around detected object
+    alert_downscale_width: int = 1920  # Downscale crops for Telegram (file size)
 
 
 @dataclass

@@ -24,13 +24,13 @@ logger = logging.getLogger(__name__)
 class MotionFrame:
     """Container for a motion detection frame with metadata"""
     
-    def __init__(self, timestamp: datetime, preview_frame: np.ndarray, 
+    def __init__(self, timestamp: datetime, motion_frame: np.ndarray, 
                  bbox: Optional[Tuple[int, int, int, int]] = None,
-                 full_res_crop: Optional[np.ndarray] = None):
+                 high_res_crop: Optional[np.ndarray] = None):
         self.timestamp = timestamp
-        self.preview_frame = preview_frame
-        self.bbox = bbox  # (x, y, w, h) in preview coordinates
-        self.full_res_crop = full_res_crop
+        self.motion_frame = motion_frame  # 4K frame used for motion detection
+        self.bbox = bbox  # (x, y, w, h) in motion coordinates
+        self.high_res_crop = high_res_crop  # Cropped section around motion
         self.confidence = 1.0
 
 
@@ -60,35 +60,28 @@ class MotionDetector:
         try:
             self.camera = Picamera2()
             
-            # Configure preview stream for motion detection
-            preview_config = self.camera.create_preview_configuration(
+            # Configure high-resolution stream for motion detection (4K)
+            motion_config = self.camera.create_preview_configuration(
                 main={
-                    "size": (config.camera.preview_width, config.camera.preview_height),
+                    "size": (config.camera.motion_width, config.camera.motion_height),
                     "format": "RGB888"
                 }
             )
             
-            # Configure full-res stream for high-quality crops
-            full_res_config = self.camera.create_still_configuration(
-                main={
-                    "size": (config.camera.full_res_width, config.camera.full_res_height),
-                    "format": "RGB888"
-                }
-            )
+            self.camera.configure(motion_config)
             
-            self.camera.configure(preview_config)
-            
-            # Enable autofocus for Arducam 64MP
+            # Set manual focus for stable image capture
+            # Autofocus was causing image corruption and digital noise
             try:
                 self.camera.set_controls({
-                    "AfMode": 2,  # Continuous autofocus
-                    "AfTrigger": 0  # Start autofocus
+                    "AfMode": 0,  # Manual focus
+                    "LensPosition": 3.0  # Focus distance (adjust as needed: 0.0=close, 10.0=far)
                 })
-                logger.info("Autofocus enabled (continuous mode)")
+                logger.info("Manual focus set (LensPosition=3.0)")
             except Exception as e:
-                logger.warning(f"Could not enable autofocus: {e}")
+                logger.warning(f"Could not set manual focus: {e}")
             
-            logger.info(f"Camera configured: preview {config.camera.preview_width}x{config.camera.preview_height}")
+            logger.info(f"Camera configured: 4K motion detection {config.camera.motion_width}x{config.camera.motion_height}")
             
         except Exception as e:
             logger.error(f"Failed to setup camera: {e}")
@@ -150,34 +143,35 @@ class MotionDetector:
         
         return True, (x, y, w, h)
     
-    def _capture_full_res_crop(self, bbox: Tuple[int, int, int, int]) -> Optional[np.ndarray]:
-        """Capture high-resolution crop around detected motion"""
+    def _create_high_res_crop(self, frame: np.ndarray, bbox: Tuple[int, int, int, int]) -> Optional[np.ndarray]:
+        """Create high-resolution crop from 4K motion frame"""
         try:
             x, y, w, h = bbox
             
-            # Scale bounding box from preview to full resolution
-            scale_x = config.camera.full_res_width / config.camera.preview_width
-            scale_y = config.camera.full_res_height / config.camera.preview_height
-            
-            # Apply margin and scale
+            # Add margin around the detection
             margin_x = int(w * config.camera.crop_margin_percent / 100)
             margin_y = int(h * config.camera.crop_margin_percent / 100)
             
-            crop_x = max(0, int((x - margin_x) * scale_x))
-            crop_y = max(0, int((y - margin_y) * scale_y))
-            crop_w = min(config.camera.full_res_width - crop_x, int((w + 2 * margin_x) * scale_x))
-            crop_h = min(config.camera.full_res_height - crop_y, int((h + 2 * margin_y) * scale_y))
+            # Calculate crop boundaries
+            crop_x = max(0, x - margin_x)
+            crop_y = max(0, y - margin_y)
+            crop_w = min(config.camera.motion_width - crop_x, w + 2 * margin_x)
+            crop_h = min(config.camera.motion_height - crop_y, h + 2 * margin_y)
             
-            # Capture full resolution image
-            full_res_array = self.camera.capture_array("main")
+            # Extract high-resolution crop
+            crop = frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
             
-            # Extract crop
-            crop = full_res_array[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+            # Optionally downscale for Telegram (to keep file sizes reasonable)
+            if crop.shape[1] > config.camera.alert_downscale_width:
+                scale_factor = config.camera.alert_downscale_width / crop.shape[1]
+                new_width = int(crop.shape[1] * scale_factor)
+                new_height = int(crop.shape[0] * scale_factor)
+                crop = cv2.resize(crop, (new_width, new_height), interpolation=cv2.INTER_AREA)
             
             return crop
             
         except Exception as e:
-            logger.error(f"Failed to capture full-res crop: {e}")
+            logger.error(f"Failed to create high-res crop: {e}")
             return None
     
     def _save_frame_data(self, motion_frame: MotionFrame):
@@ -190,36 +184,17 @@ class MotionDetector:
             frames_dir = config.get_frames_path() / date_str
             frames_dir.mkdir(parents=True, exist_ok=True)
             
-            # Save high-res crop as JPEG
-            if motion_frame.full_res_crop is not None:
+            # Save high-resolution crop as JPEG
+            if motion_frame.high_res_crop is not None:
                 crop_filename = f"{timestamp_str}_crop.jpg"
                 crop_path = frames_dir / crop_filename
                 
-                # Convert to BGR for saving (check if frame is not empty)
-                if motion_frame.full_res_crop is None or motion_frame.full_res_crop.size == 0:
-                    logger.warning("Full-res crop is empty, using preview frame instead")
-                    # Fallback to preview frame if full-res crop failed
-                    if motion_frame.preview_frame is not None and motion_frame.preview_frame.size > 0 and motion_frame.bbox is not None:
-                        # Crop the preview frame around the detected motion
-                        x, y, w, h = motion_frame.bbox
-                        # Add margin around the detection
-                        margin_x = int(w * config.camera.crop_margin_percent / 100)
-                        margin_y = int(h * config.camera.crop_margin_percent / 100)
-                        
-                        crop_x = max(0, x - margin_x)
-                        crop_y = max(0, y - margin_y)
-                        crop_w = min(config.camera.preview_width - crop_x, w + 2 * margin_x)
-                        crop_h = min(config.camera.preview_height - crop_y, h + 2 * margin_y)
-                        
-                        # Extract crop from preview frame
-                        preview_crop = motion_frame.preview_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
-                        crop_bgr = cv2.cvtColor(preview_crop, cv2.COLOR_RGB2BGR)
-                    else:
-                        logger.warning("Both full-res and preview frames are empty, skipping")
-                        return
-                else:
-                    crop_bgr = cv2.cvtColor(motion_frame.full_res_crop, cv2.COLOR_RGB2BGR)
+                # Convert to BGR for saving
+                crop_bgr = cv2.cvtColor(motion_frame.high_res_crop, cv2.COLOR_RGB2BGR)
                 cv2.imwrite(str(crop_path), crop_bgr, [cv2.IMWRITE_JPEG_QUALITY, config.alert.quality])
+            else:
+                logger.warning("No high-res crop available, skipping frame save")
+                return
                 
                 # Save metadata as JSON
                 metadata = {
@@ -325,15 +300,15 @@ class MotionDetector:
                         self.event_start_time = current_time
                         logger.info("Motion event started")
                     
-                    # Capture high-res crop
-                    full_res_crop = self._capture_full_res_crop(bbox)
+                    # Create high-resolution crop from 4K frame
+                    high_res_crop = self._create_high_res_crop(frame, bbox)
                     
                     # Create motion frame
                     motion_frame = MotionFrame(
                         timestamp=timestamp,
-                        preview_frame=frame.copy(),
+                        motion_frame=frame.copy(),
                         bbox=bbox,
-                        full_res_crop=full_res_crop
+                        high_res_crop=high_res_crop
                     )
                     
                     # Add to current event
