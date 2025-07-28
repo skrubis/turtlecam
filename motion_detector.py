@@ -44,6 +44,8 @@ class MotionDetector:
         self.last_motion_time = 0
         self.motion_event_active = False
         self.last_capture_time = 0
+        self.running = False  # Control flag for main loop
+        self.current_event_frames = []  # Store frames during motion events
         # Initialize camera for still frame capture
         self._setup_camera()
     
