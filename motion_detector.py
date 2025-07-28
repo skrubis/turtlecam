@@ -35,8 +35,168 @@ class MotionFrame:
         self.confidence = 1.0
 
 
+class TurtleTracker:
+    """Stable turtle tracking for consistent GIF crops"""
+    
+    def __init__(self):
+        self.last_bbox = None
+        self.tracking_confidence = 0
+        self.template = None
+        
+    def track_turtle(self, current_frame, previous_frame):
+        """Stable turtle tracking for consistent GIF crops"""
+        
+        if self.last_bbox is None:
+            # Initial detection
+            has_motion, bbox = self._turtle_localization_comparison(previous_frame, current_frame)
+            if has_motion:
+                self.last_bbox = bbox
+                self.tracking_confidence = 1.0
+                logger.info(f"Initial turtle detection: bbox {bbox}")
+            return has_motion, bbox
+        
+        # Try template matching first (most stable)
+        has_motion, bbox = self._template_tracking_comparison(
+            previous_frame, current_frame, self.last_bbox)
+        
+        if has_motion and bbox:
+            # Smooth the bounding box (prevent jittery crops)
+            smooth_bbox = self._smooth_bbox(bbox, self.last_bbox)
+            self.last_bbox = smooth_bbox
+            self.tracking_confidence = min(1.0, self.tracking_confidence + 0.1)
+            logger.debug(f"Template tracking: bbox {smooth_bbox}, confidence {self.tracking_confidence:.2f}")
+            return True, smooth_bbox
+        
+        # Fallback to contour detection
+        self.tracking_confidence *= 0.8
+        if self.tracking_confidence < 0.3:
+            logger.info("Tracking confidence low, resetting tracker")
+            self.last_bbox = None  # Reset tracking
+            
+        return False, self.last_bbox
+    
+    def _turtle_localization_comparison(self, frame1, frame2):
+        """Optimized for turtle localization and stable crops"""
+        try:
+            # Stage 1: Fast motion detection on tiny frame
+            tiny1 = cv2.resize(frame1, (80, 60), interpolation=cv2.INTER_NEAREST)
+            tiny2 = cv2.resize(frame2, (80, 60), interpolation=cv2.INTER_NEAREST)
+            
+            diff_tiny = cv2.absdiff(tiny1, tiny2)
+            if np.mean(diff_tiny) < 10:  # No motion
+                return False, None
+            
+            # Stage 2: Localization on medium frame (for accurate bbox)
+            med1 = cv2.resize(frame1, (320, 240), interpolation=cv2.INTER_AREA)
+            med2 = cv2.resize(frame2, (320, 240), interpolation=cv2.INTER_AREA)
+            
+            # Convert to grayscale for contour detection
+            gray1 = cv2.cvtColor(med1, cv2.COLOR_RGB2GRAY)
+            gray2 = cv2.cvtColor(med2, cv2.COLOR_RGB2GRAY)
+            
+            # Find difference and contours
+            diff = cv2.absdiff(gray1, gray2)
+            _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+            
+            # Clean up with morphology
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+            
+            # Find contours
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Filter for turtle-sized objects
+            turtle_contours = [c for c in contours if 200 < cv2.contourArea(c) < 5000]
+            
+            if turtle_contours:
+                # Get largest turtle-like contour
+                largest = max(turtle_contours, key=cv2.contourArea)
+                x, y, w, h = cv2.boundingRect(largest)
+                
+                # Scale back to full resolution
+                scale_x = frame1.shape[1] / 320
+                scale_y = frame1.shape[0] / 240
+                
+                full_x = int(x * scale_x)
+                full_y = int(y * scale_y)
+                full_w = int(w * scale_x)
+                full_h = int(h * scale_y)
+                
+                return True, (full_x, full_y, full_w, full_h)
+            
+            return False, None
+            
+        except Exception as e:
+            logger.error(f"Turtle localization failed: {e}")
+            return False, None
+    
+    def _template_tracking_comparison(self, frame1, frame2, previous_bbox):
+        """Track turtle using template matching for stable crops"""
+        try:
+            if previous_bbox is None:
+                return self._turtle_localization_comparison(frame1, frame2)
+            
+            # Extract turtle template from previous frame
+            x, y, w, h = previous_bbox
+            margin = 20
+            
+            # Ensure template bounds are valid
+            y1 = max(0, y - margin)
+            y2 = min(frame1.shape[0], y + h + margin)
+            x1 = max(0, x - margin)
+            x2 = min(frame1.shape[1], x + w + margin)
+            
+            template = frame1[y1:y2, x1:x2]
+            
+            if template.size == 0 or template.shape[0] < 10 or template.shape[1] < 10:
+                return self._turtle_localization_comparison(frame1, frame2)
+            
+            # Search for turtle in current frame (expanded search area)
+            search_margin = 100
+            search_x1 = max(0, x - search_margin)
+            search_y1 = max(0, y - search_margin)
+            search_x2 = min(frame2.shape[1], x + w + search_margin)
+            search_y2 = min(frame2.shape[0], y + h + search_margin)
+            
+            search_area = frame2[search_y1:search_y2, search_x1:search_x2]
+            
+            if search_area.size == 0:
+                return self._turtle_localization_comparison(frame1, frame2)
+            
+            # Template matching
+            result = cv2.matchTemplate(search_area, template, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(result)
+            
+            if max_val > 0.6:  # Good match found
+                # Convert back to full frame coordinates
+                new_x = search_x1 + max_loc[0]
+                new_y = search_y1 + max_loc[1]
+                
+                return True, (new_x, new_y, w, h)
+            
+            # Fallback to contour detection
+            return self._turtle_localization_comparison(frame1, frame2)
+            
+        except Exception as e:
+            logger.error(f"Template tracking failed: {e}")
+            return self._turtle_localization_comparison(frame1, frame2)
+    
+    def _smooth_bbox(self, new_bbox, old_bbox, alpha=0.7):
+        """Smooth bounding box transitions for stable crops"""
+        if old_bbox is None:
+            return new_bbox
+            
+        # Weighted average for smooth transitions
+        x = int(alpha * new_bbox[0] + (1-alpha) * old_bbox[0])
+        y = int(alpha * new_bbox[1] + (1-alpha) * old_bbox[1])
+        w = int(alpha * new_bbox[2] + (1-alpha) * old_bbox[2])
+        h = int(alpha * new_bbox[3] + (1-alpha) * old_bbox[3])
+        
+        return (x, y, w, h)
+
+
 class MotionDetector:
-    """Motion detection using background subtraction with morphological filtering"""
+    """Motion detection with hybrid turtle tracking for stable GIF crops"""
     
     def __init__(self):
         self.camera = None
@@ -48,6 +208,7 @@ class MotionDetector:
         self.running = False  # Control flag for main loop
         self.current_event_frames = []  # Store frames during motion events
         self.motion_event = Event()  # Threading event for motion detection
+        self.turtle_tracker = TurtleTracker()  # Hybrid tracking system
         # Initialize camera for still frame capture
         self._setup_camera()
     
@@ -206,32 +367,65 @@ class MotionDetector:
             logger.error(f"Still frame comparison error: {e}")
             return False, None
     
-    def _create_high_res_crop(self, frame: np.ndarray, bbox: Tuple[int, int, int, int]) -> Optional[np.ndarray]:
-        """Create high-resolution crop from 4K motion frame"""
+    def _crop_motion_area(self, frame: np.ndarray, bbox: Tuple[int, int, int, int]) -> np.ndarray:
+        """Crop the motion area from the frame with margin using tracking bbox"""
         try:
             x, y, w, h = bbox
             
-            # Add margin around the detection
-            margin_x = int(w * config.camera.crop_margin_percent / 100)
-            margin_y = int(h * config.camera.crop_margin_percent / 100)
+            # Add margin around the detected turtle
+            margin = config.motion.crop_margin
             
-            # Calculate crop boundaries
-            crop_x = max(0, x - margin_x)
-            crop_y = max(0, y - margin_y)
-            crop_w = min(config.camera.motion_width - crop_x, w + 2 * margin_x)
-            crop_h = min(config.camera.motion_height - crop_y, h + 2 * margin_y)
+            # Calculate crop bounds with margin
+            crop_x1 = max(0, x - margin)
+            crop_y1 = max(0, y - margin)
+            crop_x2 = min(frame.shape[1], x + w + margin)
+            crop_y2 = min(frame.shape[0], y + h + margin)
             
-            # Extract high-resolution crop
-            crop = frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+            # Ensure minimum crop size for turtle visibility
+            min_crop_size = 200
+            crop_w = crop_x2 - crop_x1
+            crop_h = crop_y2 - crop_y1
+            
+            if crop_w < min_crop_size or crop_h < min_crop_size:
+                # Expand crop to minimum size, centered on turtle
+                center_x = x + w // 2
+                center_y = y + h // 2
+                
+                half_size = max(min_crop_size // 2, max(crop_w, crop_h) // 2)
+                
+                crop_x1 = max(0, center_x - half_size)
+                crop_y1 = max(0, center_y - half_size)
+                crop_x2 = min(frame.shape[1], center_x + half_size)
+                crop_y2 = min(frame.shape[0], center_y + half_size)
+            
+            # Crop the frame
+            cropped = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+            
+            logger.debug(f"Cropped turtle area: {cropped.shape} from tracking bbox {bbox}")
+            return cropped
+            
+        except Exception as e:
+            logger.error(f"Failed to crop turtle area: {e}")
+            # Return center crop as fallback
+            h, w = frame.shape[:2]
+            center_x, center_y = w // 2, h // 2
+            crop_size = min(w, h) // 2
+            return frame[center_y-crop_size//2:center_y+crop_size//2,
+                       center_x-crop_size//2:center_x+crop_size//2]
+    
+    def _create_high_res_crop(self, frame: np.ndarray, bbox: Tuple[int, int, int, int]) -> Optional[np.ndarray]:
+        """Create high-resolution crop from 4K motion frame"""
+        try:
+            cropped = self._crop_motion_area(frame, bbox)
             
             # Optionally downscale for Telegram (to keep file sizes reasonable)
-            if crop.shape[1] > config.camera.alert_downscale_width:
-                scale_factor = config.camera.alert_downscale_width / crop.shape[1]
-                new_width = int(crop.shape[1] * scale_factor)
-                new_height = int(crop.shape[0] * scale_factor)
-                crop = cv2.resize(crop, (new_width, new_height), interpolation=cv2.INTER_AREA)
+            if cropped.shape[1] > config.camera.alert_downscale_width:
+                scale_factor = config.camera.alert_downscale_width / cropped.shape[1]
+                new_width = int(cropped.shape[1] * scale_factor)
+                new_height = int(cropped.shape[0] * scale_factor)
+                cropped = cv2.resize(cropped, (new_width, new_height), interpolation=cv2.INTER_AREA)
             
-            return crop
+            return cropped
             
         except Exception as e:
             logger.error(f"Failed to create high-res crop: {e}")
@@ -373,30 +567,29 @@ class MotionDetector:
                     logger.warning("Corrupted frame detected, skipping")
                     continue
                 
-                # Compare with previous frame if we have one
+                # Hybrid turtle tracking for stable GIF crops
                 has_motion = False
                 bbox = None
                 
                 if self.previous_frame is not None:
-                    has_motion, bbox = self._compare_still_frames(frame, self.previous_frame)
+                    logger.debug("Tracking turtle for motion detection...")
+                    try:
+                        # Use hybrid tracking system for stable localization
+                        has_motion, bbox = self.turtle_tracker.track_turtle(frame, self.previous_frame)
+                        
+                        if has_motion and bbox:
+                            logger.info(f"Turtle motion detected! Bbox: {bbox}")
+                        else:
+                            logger.debug("No turtle motion detected")
+                            
+                    except Exception as e:
+                        logger.error(f"Turtle tracking failed: {e}")
                 else:
                     logger.info("First frame captured, storing as reference")
                 
-                # Store current frame as previous for next comparison (memory efficient)
-                # Delete old frame first to free memory immediately
-                if self.previous_frame is not None:
-                    del self.previous_frame
-                self.previous_frame = frame.copy()
-                
-                # Force garbage collection every 10 frames to prevent memory buildup
-                if hasattr(self, '_frame_count'):
-                    self._frame_count += 1
-                else:
-                    self._frame_count = 1
-                    
-                if self._frame_count % 10 == 0:
-                    gc.collect()  # Force garbage collection
-                    logger.debug(f"Memory cleanup after {self._frame_count} frames")
+                # Store current frame (avoid expensive copy - just keep reference)
+                logger.debug("Storing frame reference...")
+                self.previous_frame = frame  # Just reference, no copy!
                 
                 if has_motion:
                     logger.debug(f"Motion detected: {bbox}")
