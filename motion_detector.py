@@ -91,7 +91,12 @@ class MotionDetector:
             varThreshold=config.motion.motion_threshold,
             history=500  # Longer history for stable background
         )
-        self.background_subtractor.setLearningRate(config.motion.background_learning_rate)
+        # Note: setLearningRate method name varies between OpenCV versions
+        try:
+            self.background_subtractor.setLearningRate(config.motion.background_learning_rate)
+        except AttributeError:
+            # Fallback for older OpenCV versions
+            pass
         logger.info("Background subtractor initialized")
     
     def _preprocess_frame(self, frame: np.ndarray) -> np.ndarray:

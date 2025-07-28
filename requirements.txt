@@ -1,16 +1,14 @@
 # TurtleCam Dependencies
-# Core camera and computer vision
-picamera2>=0.3.12
-opencv-python>=4.8.0
-numpy>=1.24.0
-Pillow>=10.0.0
+# Note: opencv, numpy, Pillow, psutil should be installed as system packages
+# to avoid binary compatibility issues with picamera2
 
-# Telegram bot
+# Core dependencies (install via pip)
 python-telegram-bot>=20.0
-
-# System monitoring
-psutil>=5.9.0
+python-dotenv>=0.19.0
 
 # Development and testing
 pytest>=7.0.0
 ruff>=0.1.0
+
+# System packages (install via apt):
+# sudo apt install python3-opencv python3-numpy python3-pil python3-psutil python3-libcamera python3-kms++
