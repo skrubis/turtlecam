@@ -12,11 +12,15 @@ from dotenv import load_dotenv
 
 @dataclass
 class CameraConfig:
-    """Camera and still frame settings (high-res with 256M GPU memory)"""
-    # High-res still frame capture for turtle motion detection (1fps = we can go big!)
-    motion_width: int = 4608   # 4.6K width (half of 64MP width for stability)
-    motion_height: int = 3472  # 4.6K height (half of 64MP height)
-    motion_fps: int = 1        # Ultra-low FPS allows high resolution
+    """Camera and dual-resolution settings (fast comparison + high-res crops)"""
+    # High-res capture for beautiful crops
+    capture_width: int = 4608   # 4.6K width for crop source
+    capture_height: int = 3472  # 4.6K height for crop source
+    
+    # Low-res comparison for fast motion detection (resize from high-res)
+    comparison_width: int = 1152  # 1/4 of capture width (fast processing)
+    comparison_height: int = 868  # 1/4 of capture height
+    motion_fps: int = 1          # Ultra-low FPS
     
     # Still frame comparison settings (optimized for 4.6K resolution)
     frame_comparison_threshold: float = 3.0  # % difference to trigger motion (lower for high-res sensitivity)

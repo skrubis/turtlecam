@@ -55,10 +55,10 @@ class MotionDetector:
         try:
             self.camera = Picamera2()
             
-            # Configure high-resolution stream for motion detection with memory optimization
+            # Configure high-resolution capture with memory optimization
             motion_config = self.camera.create_preview_configuration(
                 main={
-                    "size": (config.camera.motion_width, config.camera.motion_height),
+                    "size": (config.camera.capture_width, config.camera.capture_height),
                     "format": "RGB888"
                 },
                 buffer_count=2  # Minimize buffer count to reduce memory usage
@@ -79,7 +79,7 @@ class MotionDetector:
             except Exception as e:
                 logger.warning(f"Could not set manual controls: {e}")
             
-            logger.info(f"Camera configured: Ultra-high-res motion detection {config.camera.motion_width}x{config.camera.motion_height} @ {config.camera.motion_fps}fps")
+            logger.info(f"Camera configured: Dual-resolution system - Capture: {config.camera.capture_width}x{config.camera.capture_height}, Comparison: {config.camera.comparison_width}x{config.camera.comparison_height} @ {config.camera.motion_fps}fps")
             
         except Exception as e:
             if "Cannot allocate memory" in str(e):
@@ -143,11 +143,16 @@ class MotionDetector:
             return None
     
     def _compare_still_frames(self, current_frame: np.ndarray, previous_frame: np.ndarray) -> Tuple[bool, Optional[Tuple[int, int, int, int]]]:
-        """Compare two still frames to detect significant motion (turtle movement)"""
+        """Compare two still frames using low-res comparison for speed"""
         try:
-            # Convert both frames to grayscale for comparison
-            current_gray = cv2.cvtColor(current_frame, cv2.COLOR_RGB2GRAY)
-            previous_gray = cv2.cvtColor(previous_frame, cv2.COLOR_RGB2GRAY)
+            # Resize frames to low-res for fast comparison (4.6K -> 1.2K)
+            comparison_size = (config.camera.comparison_width, config.camera.comparison_height)
+            current_small = cv2.resize(current_frame, comparison_size, interpolation=cv2.INTER_AREA)
+            previous_small = cv2.resize(previous_frame, comparison_size, interpolation=cv2.INTER_AREA)
+            
+            # Convert resized frames to grayscale for comparison
+            current_gray = cv2.cvtColor(current_small, cv2.COLOR_RGB2GRAY)
+            previous_gray = cv2.cvtColor(previous_small, cv2.COLOR_RGB2GRAY)
             
             # Calculate absolute difference between frames
             diff = cv2.absdiff(current_gray, previous_gray)
@@ -178,8 +183,18 @@ class MotionDetector:
                 if valid_contours:
                     # Get the largest contour (main turtle movement)
                     largest_contour = max(valid_contours, key=cv2.contourArea)
-                    x, y, w, h = cv2.boundingRect(largest_contour)
-                    logger.info(f"Turtle motion detected: {change_percentage:.2f}% change, bbox: ({x},{y},{w},{h})")
+                    x_small, y_small, w_small, h_small = cv2.boundingRect(largest_contour)
+                    
+                    # Scale bounding box back to high-res coordinates
+                    scale_x = config.camera.capture_width / config.camera.comparison_width
+                    scale_y = config.camera.capture_height / config.camera.comparison_height
+                    
+                    x = int(x_small * scale_x)
+                    y = int(y_small * scale_y)
+                    w = int(w_small * scale_x)
+                    h = int(h_small * scale_y)
+                    
+                    logger.info(f"Turtle motion detected: {change_percentage:.2f}% change, bbox: ({x},{y},{w},{h}) [scaled from low-res]")
                     return True, (x, y, w, h)
             
             return False, None
