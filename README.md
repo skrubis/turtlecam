@@ -26,8 +26,10 @@ A smart terrarium monitoring system for Hermann's tortoises using Raspberry Pi 4
 # Update system
 sudo apt update && sudo apt upgrade -y
 
-# Create turtle user
-sudo useradd -m -s /bin/bash turtle
+# If turtle user doesn't exist, create it:
+# sudo useradd -m -s /bin/bash turtle
+
+# Ensure turtle user has required permissions
 sudo usermod -aG video,gpio turtle
 ```
 
