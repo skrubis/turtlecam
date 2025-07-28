@@ -353,9 +353,13 @@ class MotionDetector:
                 current_time = time.time()
                 timestamp = datetime.now()
                 
-                # Check if it's time to capture a new still frame
-                if current_time - self.last_capture_time < config.camera.still_frame_interval:
-                    time.sleep(0.1)  # Small sleep to prevent CPU spinning
+                # Check if it's time to capture a new still frame (timelapse mode)
+                time_since_last = current_time - self.last_capture_time
+                if time_since_last < config.camera.still_frame_interval:
+                    remaining = config.camera.still_frame_interval - time_since_last
+                    if remaining > 1.0:  # Only log if more than 1 second remaining
+                        logger.debug(f"Timelapse waiting: {remaining:.1f}s until next frame")
+                    time.sleep(1.0)  # Sleep 1 second at a time for responsive logging
                     continue
                 
                 # Capture still frame (memory efficient single capture)

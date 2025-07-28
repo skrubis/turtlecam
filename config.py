@@ -22,9 +22,9 @@ class CameraConfig:
     comparison_height: int = 240  # Tiny height (VGA-like for speed)
     motion_fps: int = 1          # Ultra-low FPS
     
-    # Still frame comparison settings (optimized for 4.6K resolution)
-    frame_comparison_threshold: float = 3.0  # % difference to trigger motion (lower for high-res sensitivity)
-    still_frame_interval: float = 0.8       # Slightly faster captures for better turtle tracking
+    # Timelapse comparison settings (optimized for turtle behavior)
+    frame_comparison_threshold: float = 2.0  # % difference to trigger motion (sensitive for slow movement)
+    still_frame_interval: float = 5.0       # Timelapse: 5 seconds between frames (perfect for turtles)
     
     # Full resolution for special captures (if needed)
     full_res_width: int = 9152  # Arducam Hawkeye 64MP
