@@ -188,8 +188,8 @@ class MotionDetector:
                 if motion_frame.full_res_crop is None or motion_frame.full_res_crop.size == 0:
                     logger.warning("Full-res crop is empty, using preview frame instead")
                     # Fallback to preview frame if full-res crop failed
-                    if motion_frame.frame is not None and motion_frame.frame.size > 0:
-                        crop_bgr = cv2.cvtColor(motion_frame.frame, cv2.COLOR_RGB2BGR)
+                    if motion_frame.preview_frame is not None and motion_frame.preview_frame.size > 0:
+                        crop_bgr = cv2.cvtColor(motion_frame.preview_frame, cv2.COLOR_RGB2BGR)
                     else:
                         logger.warning("Both full-res and preview frames are empty, skipping")
                         return
