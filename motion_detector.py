@@ -184,7 +184,10 @@ class MotionDetector:
                 crop_filename = f"{timestamp_str}_crop.jpg"
                 crop_path = frames_dir / crop_filename
                 
-                # Convert RGB to BGR for OpenCV
+                # Convert to BGR for saving (check if frame is not empty)
+                if motion_frame.full_res_crop is None or motion_frame.full_res_crop.size == 0:
+                    logger.warning("Skipping empty frame")
+                    return
                 crop_bgr = cv2.cvtColor(motion_frame.full_res_crop, cv2.COLOR_RGB2BGR)
                 cv2.imwrite(str(crop_path), crop_bgr, [cv2.IMWRITE_JPEG_QUALITY, config.alert.quality])
                 
