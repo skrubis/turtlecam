@@ -234,6 +234,24 @@ class MotionDetector:
         except Exception as e:
             logger.error(f"Failed to save frame data: {e}")
     
+    def _trigger_telegram_alert(self):
+        """Trigger Telegram alert by calling the bot service"""
+        try:
+            import subprocess
+            # Call the telegram bot to send an alert
+            result = subprocess.run([
+                "/opt/turtlecam/venv/bin/python3", 
+                "/opt/turtlecam/telegram_bot.py", 
+                "--alert"
+            ], capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0:
+                logger.info("Telegram alert triggered successfully")
+            else:
+                logger.error(f"Failed to trigger Telegram alert: {result.stderr}")
+        except Exception as e:
+            logger.error(f"Failed to trigger Telegram alert: {e}")
+    
     def _process_motion_event(self):
         """Process accumulated motion frames into alert"""
         if not self.current_event_frames:
@@ -247,6 +265,9 @@ class MotionDetector:
         
         # Trigger GIF/video creation (handled by separate service)
         self.motion_event.set()
+        
+        # Trigger Telegram alert directly
+        self._trigger_telegram_alert()
         
         # Clear event frames
         self.current_event_frames.clear()
