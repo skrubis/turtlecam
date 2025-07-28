@@ -81,7 +81,7 @@ class MotionDetector:
             except Exception as e:
                 logger.warning(f"Could not set manual focus: {e}")
             
-            logger.info(f"Camera configured: 4K motion detection {config.camera.motion_width}x{config.camera.motion_height}")
+            logger.info(f"Camera configured: Ultra-high-res motion detection {config.camera.motion_width}x{config.camera.motion_height} @ {config.camera.motion_fps}fps")
             
         except Exception as e:
             logger.error(f"Failed to setup camera: {e}")
@@ -103,13 +103,42 @@ class MotionDetector:
             pass
         logger.info("Background subtractor initialized")
     
+    def _is_frame_corrupted(self, frame: np.ndarray) -> bool:
+        """Check if frame is corrupted or contains garbage data"""
+        if frame is None or frame.size == 0:
+            return True
+            
+        # Check for extreme values that indicate corruption
+        mean_val = np.mean(frame)
+        std_val = np.std(frame)
+        
+        # Corrupted frames often have extreme mean/std values
+        if mean_val < 5 or mean_val > 250:  # Too dark or too bright
+            return True
+        if std_val < 1 or std_val > 100:    # Too uniform or too noisy
+            return True
+            
+        # Check for stripe patterns (common in corruption)
+        # Look for repeating patterns in rows
+        if frame.shape[0] > 100:  # Only for reasonably sized frames
+            row_sample = frame[frame.shape[0]//2, :]
+            if len(np.unique(row_sample)) < 10:  # Too few unique values = stripes
+                return True
+                
+        return False
+    
     def _preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
-        """Preprocess frame for motion detection"""
-        # Convert to grayscale for background subtraction
+        """Preprocess frame for motion detection with corruption filtering"""
+        # Check for frame corruption first
+        if self._is_frame_corrupted(frame):
+            logger.warning("Corrupted frame detected, skipping")
+            return None
+            
+        # Convert to grayscale for motion detection
         gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
         
-        # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        # Apply Gaussian blur to reduce noise (stronger for high-res)
+        blurred = cv2.GaussianBlur(gray, (7, 7), 0)
         
         return blurred
     
@@ -288,8 +317,15 @@ class MotionDetector:
                 current_time = time.time()
                 timestamp = datetime.now()
                 
+                # Preprocess frame (includes corruption detection)
+                processed_frame = self._preprocess_frame(frame)
+                
+                # Skip corrupted frames
+                if processed_frame is None:
+                    continue
+                
                 # Detect motion
-                has_motion, bbox = self._detect_motion(frame)
+                has_motion, bbox = self._detect_motion(processed_frame)
                 
                 if has_motion:
                     logger.debug(f"Motion detected: {bbox}")

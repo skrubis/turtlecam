@@ -12,11 +12,11 @@ from dotenv import load_dotenv
 
 @dataclass
 class CameraConfig:
-    """Camera and high-resolution settings"""
-    # High-res motion detection (4K for good balance of quality vs performance)
-    motion_width: int = 3840  # 4K width
-    motion_height: int = 2160  # 4K height
-    motion_fps: int = 10  # Lower FPS for high-res processing
+    """Camera and ultra-high-resolution settings"""
+    # Ultra-high-res motion detection (8K for maximum detail, turtle-optimized)
+    motion_width: int = 6144   # 6K width (2/3 of full 64MP)
+    motion_height: int = 3456  # 6K height (2/3 of full 64MP) 
+    motion_fps: int = 2        # Ultra-low FPS for stability (turtle == slow)
     
     # Full resolution for special captures (if needed)
     full_res_width: int = 9152  # Arducam Hawkeye 64MP
