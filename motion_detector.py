@@ -77,6 +77,17 @@ class MotionDetector:
             )
             
             self.camera.configure(preview_config)
+            
+            # Enable autofocus for Arducam 64MP
+            try:
+                self.camera.set_controls({
+                    "AfMode": 2,  # Continuous autofocus
+                    "AfTrigger": 0  # Start autofocus
+                })
+                logger.info("Autofocus enabled (continuous mode)")
+            except Exception as e:
+                logger.warning(f"Could not enable autofocus: {e}")
+            
             logger.info(f"Camera configured: preview {config.camera.preview_width}x{config.camera.preview_height}")
             
         except Exception as e:
@@ -188,8 +199,21 @@ class MotionDetector:
                 if motion_frame.full_res_crop is None or motion_frame.full_res_crop.size == 0:
                     logger.warning("Full-res crop is empty, using preview frame instead")
                     # Fallback to preview frame if full-res crop failed
-                    if motion_frame.preview_frame is not None and motion_frame.preview_frame.size > 0:
-                        crop_bgr = cv2.cvtColor(motion_frame.preview_frame, cv2.COLOR_RGB2BGR)
+                    if motion_frame.preview_frame is not None and motion_frame.preview_frame.size > 0 and motion_frame.bbox is not None:
+                        # Crop the preview frame around the detected motion
+                        x, y, w, h = motion_frame.bbox
+                        # Add margin around the detection
+                        margin_x = int(w * config.camera.crop_margin_percent / 100)
+                        margin_y = int(h * config.camera.crop_margin_percent / 100)
+                        
+                        crop_x = max(0, x - margin_x)
+                        crop_y = max(0, y - margin_y)
+                        crop_w = min(config.camera.preview_width - crop_x, w + 2 * margin_x)
+                        crop_h = min(config.camera.preview_height - crop_y, h + 2 * margin_y)
+                        
+                        # Extract crop from preview frame
+                        preview_crop = motion_frame.preview_frame[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                        crop_bgr = cv2.cvtColor(preview_crop, cv2.COLOR_RGB2BGR)
                     else:
                         logger.warning("Both full-res and preview frames are empty, skipping")
                         return
