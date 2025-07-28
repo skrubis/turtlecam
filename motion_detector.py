@@ -186,9 +186,15 @@ class MotionDetector:
                 
                 # Convert to BGR for saving (check if frame is not empty)
                 if motion_frame.full_res_crop is None or motion_frame.full_res_crop.size == 0:
-                    logger.warning("Skipping empty frame")
-                    return
-                crop_bgr = cv2.cvtColor(motion_frame.full_res_crop, cv2.COLOR_RGB2BGR)
+                    logger.warning("Full-res crop is empty, using preview frame instead")
+                    # Fallback to preview frame if full-res crop failed
+                    if motion_frame.frame is not None and motion_frame.frame.size > 0:
+                        crop_bgr = cv2.cvtColor(motion_frame.frame, cv2.COLOR_RGB2BGR)
+                    else:
+                        logger.warning("Both full-res and preview frames are empty, skipping")
+                        return
+                else:
+                    crop_bgr = cv2.cvtColor(motion_frame.full_res_crop, cv2.COLOR_RGB2BGR)
                 cv2.imwrite(str(crop_path), crop_bgr, [cv2.IMWRITE_JPEG_QUALITY, config.alert.quality])
                 
                 # Save metadata as JSON
