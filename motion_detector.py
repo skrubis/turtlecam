@@ -46,6 +46,7 @@ class MotionDetector:
         self.last_capture_time = 0
         self.running = False  # Control flag for main loop
         self.current_event_frames = []  # Store frames during motion events
+        self.motion_event = Event()  # Threading event for motion detection
         # Initialize camera for still frame capture
         self._setup_camera()
     
@@ -65,16 +66,18 @@ class MotionDetector:
             
             self.camera.configure(motion_config)
             
-            # Set manual focus for stable image capture
-            # Autofocus was causing image corruption and digital noise
+            # Set manual controls to avoid auto-adjustments causing false motion
             try:
                 self.camera.set_controls({
-                    "AfMode": 0,  # Manual focus
-                    "LensPosition": 3.0  # Focus distance (adjust as needed: 0.0=close, 10.0=far)
+                    "LensPosition": 3.0,      # Manual focus
+                    "AeEnable": False,        # Disable auto-exposure
+                    "AwbEnable": False,       # Disable auto-white-balance
+                    "ExposureTime": 10000,    # Fixed exposure (10ms)
+                    "AnalogueGain": 2.0,      # Fixed gain
                 })
-                logger.info("Manual focus set (LensPosition=3.0)")
+                logger.info("Manual controls set (focus, exposure, white balance fixed)")
             except Exception as e:
-                logger.warning(f"Could not set manual focus: {e}")
+                logger.warning(f"Could not set manual controls: {e}")
             
             logger.info(f"Camera configured: Ultra-high-res motion detection {config.camera.motion_width}x{config.camera.motion_height} @ {config.camera.motion_fps}fps")
             
@@ -323,6 +326,10 @@ class MotionDetector:
         
         try:
             self.camera.start()
+            
+            # Let camera stabilize (auto-exposure/white-balance settle)
+            logger.info("Camera stabilizing for 3 seconds...")
+            time.sleep(3)
             
             while self.running:
                 current_time = time.time()
