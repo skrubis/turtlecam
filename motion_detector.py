@@ -327,7 +327,7 @@ class MotionDetector:
                         self._process_motion_event()
                 
                 # Control frame rate
-                time.sleep(1.0 / config.camera.preview_fps)
+                time.sleep(1.0 / config.camera.motion_fps)
                 
         except Exception as e:
             logger.error(f"Motion detection error: {e}")
