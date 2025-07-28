@@ -89,8 +89,9 @@ class Config:
         self.storage = StorageConfig()
         self.system = SystemConfig()
         
-        # Load .env file first
-        load_dotenv()
+        # Load .env file first (use absolute path)
+        env_file = Path(__file__).parent / '.env'
+        load_dotenv(env_file)
         
         # Load from .env file
         self._load_env()
