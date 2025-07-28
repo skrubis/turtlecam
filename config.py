@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 from pathlib import Path
+from dotenv import load_dotenv
 
 
 @dataclass
@@ -87,6 +88,9 @@ class Config:
         self.telegram = TelegramConfig()
         self.storage = StorageConfig()
         self.system = SystemConfig()
+        
+        # Load .env file first
+        load_dotenv()
         
         # Load from .env file
         self._load_env()

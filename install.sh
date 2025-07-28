@@ -42,6 +42,8 @@ sudo apt install -y \
     python3 \
     python3-pip \
     python3-venv \
+    python3-libcamera \
+    python3-kms++ \
     ffmpeg \
     sqlite3 \
     systemd \
@@ -53,7 +55,8 @@ sudo chown turtle:turtle "$DATA_DIR" "$LOG_DIR"
 sudo chmod 755 "$DATA_DIR" "$LOG_DIR"
 
 echo -e "${GREEN}🔧 Setting up Python virtual environment...${NC}"
-sudo python3 -m venv "$INSTALL_DIR/venv"
+# Create venv with system site packages to access libcamera
+sudo python3 -m venv "$INSTALL_DIR/venv" --system-site-packages
 sudo chown -R turtle:turtle "$INSTALL_DIR"
 
 # Activate virtual environment

@@ -282,6 +282,53 @@ echo '/dev/sda1 /mnt/external ext4 defaults 0 2' | sudo tee -a /etc/fstab
 
 ## Troubleshooting Common Issues
 
+### "ModuleNotFoundError: No module named 'libcamera'"
+This is a common issue when picamera2 can't find the libcamera Python bindings:
+
+```bash
+# Stop services
+sudo systemctl stop turtle_motion.service turtle_bot.service
+
+# Install system libcamera packages
+sudo apt update
+sudo apt install -y python3-libcamera python3-kms++
+
+# Recreate venv with system packages access
+cd /opt/turtlecam
+sudo rm -rf venv
+sudo python3 -m venv venv --system-site-packages
+sudo chown -R turtle:turtle venv
+
+# Reinstall requirements
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Restart services
+sudo systemctl start turtle_motion.service turtle_bot.service
+```
+
+### "database or disk is full"
+SQLite can't create the database when disk space is full:
+
+```bash
+# Check disk usage
+df -h
+
+# Free up space
+sudo apt clean
+sudo apt autoremove
+sudo journalctl --vacuum-time=7d
+
+# Check large files
+sudo du -sh /* 2>/dev/null | sort -hr | head -10
+
+# If /var/lib/turtle is on a small partition, move it:
+sudo systemctl stop turtle_motion.service turtle_bot.service
+sudo mv /var/lib/turtle /home/turtle/turtle_data
+sudo ln -s /home/turtle/turtle_data /var/lib/turtle
+sudo systemctl start turtle_motion.service turtle_bot.service
+```
+
 ### "No camera detected"
 - Check CSI cable connection
 - Enable camera: `sudo raspi-config` → Interface Options → Camera
